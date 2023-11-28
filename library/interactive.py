@@ -281,7 +281,7 @@ def intensity_scale(im1, im2, mask=None):
 class AzimuthalIntegrationCenter:
     """Plot image with controls for contrast and center alignment tools."""
 
-    def __init__(self, im, ai, c0=None, c1=None, **kwargs):
+    def __init__(self, im, ai, c0=None, c1=None, mask=None,**kwargs):
         # User Feedback/Instructions
         print("Left: 1d azimuthal Integration I(q)")
         print("Right: 2d azimuthal Integration I(q,chi)")
@@ -303,6 +303,7 @@ class AzimuthalIntegrationCenter:
         self.pixel_size2 = ai.detector.get_pixel2()
         self.qlines = kwargs["qlines"]
         self.ai = ai
+        self.mask = mask
 
         # Calc azimuthal integration
         self.I_t, self.q_t, self.phi_t = self.ai.integrate2d(
@@ -311,7 +312,8 @@ class AzimuthalIntegrationCenter:
             radial_range=self.radial_range,
             unit="q_nm^-1",
             correctSolidAngle=False,
-            #method="cython"
+            dummy=np.nan,
+            mask = self.mask
         )
         self.mI_t = np.mean(self.I_t, axis=0)
 
@@ -354,7 +356,8 @@ class AzimuthalIntegrationCenter:
             radial_range=self.radial_range,
             unit="q_nm^-1",
             correctSolidAngle=False,
-            #method="cython"
+            dummy=np.nan,
+            mask = self.mask
         )
         self.mI_t = np.mean(self.I_t, axis=0)
 
