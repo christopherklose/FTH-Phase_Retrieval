@@ -117,8 +117,8 @@ class InteractiveCenter:
             self.circles.append(circle)
             self.ax.add_artist(circle)
 
-        w_c0 = ipywidgets.IntText(value=c0,step = 0.5, description="c0")
-        w_c1 = ipywidgets.IntText(value=c1,step = 0.5, description="c1")
+        w_c0 = ipywidgets.IntText(value=c0,step = 0.5, description="c0 (vert)")
+        w_c1 = ipywidgets.IntText(value=c1,step = 0.5, description="c1 (hor)")
         w_rBS = ipywidgets.IntText(value=rBS, description="rBS")
         
         ipywidgets.interact(self.update, c0=w_c0, c1=w_c1, r=w_rBS)
@@ -285,7 +285,8 @@ class AzimuthalIntegrationCenter:
         # User Feedback/Instructions
         print("Left: 1d azimuthal Integration I(q)")
         print("Right: 2d azimuthal Integration I(q,chi)")
-        print("Use sliders to adjust center position. Try to transform all rings of the Airy pattern into a straight line in the I(q,chi)-plot. Maximize fringe contrast in I(q) plot for fine-tuning.")
+        print("Use arrow buttons on keyboard to adjust center position after selecting a slider.") 
+        print("Try to transform all rings of the Airy pattern into a straight line in the 2d I(q,chi)-plot. Maximize fringe contrast in 1d I(q) plot for fine-tuning.")
         
         # Get center
         self.im = np.array(im)
@@ -506,8 +507,8 @@ class InteractiveBeamstop:
         cim = ipywidgets.interact(self.update_plt, contrast = sl_contrast)
         
         #Change beamstop parameter
-        w_rBS = ipywidgets.IntText(value=self.rBS, description="rBS")
-        w_std = ipywidgets.IntText(value=self.stdBS, description="stdBS")
+        w_rBS = ipywidgets.IntText(value=self.rBS, description="radius")
+        w_std = ipywidgets.IntText(value=self.stdBS, description="smoothing")
         ipywidgets.interact(self.update_bs, r=w_rBS,std = w_std)
     
     #Update plot

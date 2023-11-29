@@ -137,3 +137,8 @@ def binning(array, binning_factor):
     
     new_array = array.reshape(shape).mean(-1).mean(1)
     return new_array
+
+
+#=========================
+# Other
+#=========================
