@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import PolygonSelector
 from matplotlib.path import Path
 import ipywidgets
+import ipywidgets as widgets
 
 import pyFAI
 from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
@@ -316,7 +317,7 @@ class AzimuthalIntegrationCenter:
             dummy=np.nan,
             mask = self.mask
         )
-        self.mI_t = np.mean(self.I_t, axis=0)
+        self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
         self.fig, self.ax = plt.subplots(1, 2, figsize=(10, 4))
@@ -360,7 +361,7 @@ class AzimuthalIntegrationCenter:
             dummy=np.nan,
             mask = self.mask
         )
-        self.mI_t = np.mean(self.I_t, axis=0)
+        self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
         # 1d Ai
@@ -374,104 +375,6 @@ class AzimuthalIntegrationCenter:
         mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
         self.timshow.set_data(self.I_t)
         self.timshow.set_clim([mi, ma])
-        
-        
-class InteractiveCircleCoordinates:
-    """Draw a given number of circles. Radi and position of each circel can be adjusted with sliders. Useful for holographically-aided, iterative phase retrieval."""
-
-    def __init__(self, im, nr_circ, support_coordinates="None", **kwargs):
-        # Display image
-        im = np.array(im)
-        self.fig, self.ax = cimshow(im, cmap="gray", **kwargs)
-        self.mm = self.ax.get_images()[0]
-
-        # Create list of aperture coordinates
-        if support_coordinates == "None":
-            self.c_yxr = []
-            for i in range(nr_circ):
-                self.c_yxr.append([im.shape[-2] // 2, im.shape[-1] // 2, 15])
-        else:
-            self.c_yxr = support_coordinates
-
-        # Draw circles
-        self.circles = []
-        for i in range(nr_circ):
-            color = "r" if i == 0 else "g"
-            circle = plt.Circle(
-                [self.c_yxr[i][1], self.c_yxr[i][0]],
-                self.c_yxr[i][2],
-                ec=color,
-                fill=False,
-            )
-            self.circles.append(circle)
-            self.ax.add_artist(circle)
-
-        # Create slider to select aperture
-        w_idx = ipywidgets.IntSlider(
-            value=0,
-            min=0,
-            max=nr_circ - 1,
-            step=1,
-            description="circle index",
-            layout=ipywidgets.Layout(width="250px"),
-        )
-
-        # Create circle widget sliders
-        label = ["yc", "xc", "r0"]
-        width = ["600px", "600px", "500px"]
-        mi = [im.shape[-2] // 2 - im.shape[-2] // 2, im.shape[-2] // 2 - im.shape[-2] // 2, 0]
-        ma = [im.shape[-2] // 2 + im.shape[-2] // 2, im.shape[-2] // 2 + im.shape[-2] // 2, im.shape[-2] // 10]
-        w = [
-            ipywidgets.FloatSlider(
-                value=self.c_yxr[0][k],
-                min=mi[k],
-                max=ma[k],
-                step=0.5,
-                description=label[k],
-                layout=ipywidgets.Layout(width=width[k]),
-            )
-            for k in range(3)
-        ]
-        self.w = w
-
-        # Interactive user interface
-        iidx = ipywidgets.interact(self.update_index, idx_circ=w_idx)
-        icirc = ipywidgets.interact(
-            self.update,
-            c0=self.w[0],
-            c1=self.w[1],
-            r=self.w[2],
-        )
-
-    # Update initial widget values to the ones from list when changing between circles
-    def update_index(self, idx_circ):
-        self.idx = idx_circ
-        cy = self.c_yxr[self.idx][0]
-        cx = self.c_yxr[self.idx][1]
-        cr = self.c_yxr[self.idx][2]
-
-        # Keep these separated as this prevents overwriting of the individual widget values
-        self.w[0].value = cy
-        self.w[1].value = cx
-        self.w[2].value = cr
-        
-        #Change color, active circle is red
-        for i, c in enumerate(self.circles):
-            color = "r" if i == self.idx else "g"
-            c.set_edgecolor(color)
-
-    # Update circle values
-    def update(self, c0, c1, r):
-        # Update coordinate dictionary
-        self.c_yxr[self.idx] = [c0, c1, r]
-
-        # Update drawn circles
-        c = self.circles[self.idx]
-        c.set_center([c1, c0])
-        c.set_radius(r)
-
-        print("Aperture Coordinates:")
-        print(self.c_yxr)
         
         
 class InteractiveBeamstop:
@@ -558,7 +461,7 @@ class draw_polygon_mask:
         """Create plot and control widgets"""
 
         # Plotting
-        fig, self.ax = plt.subplots()
+        fig, self.ax = plt.subplots(figsize= (8,8))
         self.mm = self.ax.imshow(self.image_plot)
         # self.overlay = self.ax.imshow(self.full_mask, alpha=0.2)
         cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.1, 99, 0.1, 99.9])
@@ -665,7 +568,7 @@ class InteractiveAutoBeamstop:
                 description="Radius",
             ),
             "expand": ipywidgets.FloatSlider(
-                min=0, max=20, value=self.expand, step=1, description="Expansion"
+                min=0, max=20, value=self.expand, step=.5, description="Expansion"
             ),
         }
 
@@ -816,3 +719,105 @@ class InteractiveAutoBeamstop:
     def update_mask(self):
         self.m1.set_data(self.image * self.mask_bs)
         self.m2.set_data(self.image * (1 - self.mask_bs))
+        
+            
+            
+class InteractiveCircleCoordinates:
+    masks = []
+
+    def __init__(self, image, num_masks,coordinates=None):
+        print("Right click to move circle to mouse position!")
+        self.image = image
+        self.num_masks = num_masks
+        self.init_masks(coordinates)
+        self.draw_gui()
+
+    def init_masks(self,coordinates):
+        if coordinates is None:
+            coordinates = []
+            for n in range(self.num_masks):
+                coordinates.append([self.image.shape[0]/2,self.image.shape[1]/2,10])
+                
+        self.masks = [
+            plt.Circle((coordinates[n][1],coordinates[n][0]), coordinates[n][2], fill=False, ec="r") for n in range(self.num_masks)
+        ]
+
+    def draw_gui(self):
+        """Create plot and control widgets."""
+
+        self.fig, self.ax = plt.subplots(figsize=(6,6))
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
+        self.mm = self.ax.imshow(self.image,vmin=vmin,vmax=vmax,cmap='gray')
+        for mask in self.masks:
+            self.ax.add_artist(mask)
+            
+        self.widgets = {
+            "contrast": widgets.FloatRangeSlider(
+            value=(vmin, vmax),
+            min=cmin,
+            max=cmax,
+            step=(vmax - vmin) / 500,
+            layout=ipywidgets.Layout(width="500px"),
+            ),
+            "mask_index": widgets.IntSlider(min=0, max=self.num_masks - 1, value=0),
+            "radius": widgets.FloatSlider(
+                min=0, max=400, value=10, step=0.5, description="radius",layout=ipywidgets.Layout(width="350px"),
+            ),
+            "c0": widgets.FloatSlider(
+                min=0, max=2048, value=1024, step=0.5, description="x",layout=ipywidgets.Layout(width="400px"),
+            ),
+            "c1": widgets.FloatSlider(
+                min=0, max=2048, value=1024, step=0.5, description="y",layout=ipywidgets.Layout(width="400px"),
+            ),
+        }
+
+        ipywidgets.interact(self.update_plt, contrast=self.widgets["contrast"])
+        widgets.interact(self.update_controls, index=self.widgets["mask_index"])
+        widgets.interact(
+            self.update_circle,
+            radius=self.widgets["radius"],
+            c0=self.widgets["c0"],
+            c1=self.widgets["c1"],
+        )
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
+        
+    # Update imshow plot colormap
+    def update_plt(self, contrast):
+        self.mm.set_clim(contrast)
+
+    def update_controls(self, index):
+        """Update control widget values with selected circle parameters."""
+        circle = self.masks[index]
+        r, (c0, c1) = circle.radius, circle.center
+
+        self.widgets["radius"].value = r
+        self.widgets["c0"].value = c0
+        self.widgets["c1"].value = c1
+            
+        for c in self.masks:
+            c.set_edgecolor("g")
+        self.masks[index].set_edgecolor("r")
+
+    def update_circle(self, radius, c0, c1):
+        """Set center and size of active circle."""
+        index = self.widgets["mask_index"].value
+        self.masks[index].set_radius(radius)
+        self.masks[index].set_center([c0, c1])
+        
+        print("Aperture Coordinates:")
+        print(self.get_mask())
+
+    def onclick_handler(self, event):
+        """Set the center of the active circle to clicked position."""
+        index = self.widgets["mask_index"].value
+        if event.button == 3:  # MouseButton.RIGHT:
+            c0, c1 = (event.xdata, event.ydata)
+            self.masks[index].set_center([c0, c1])
+            self.widgets["c0"].value = c0
+            self.widgets["c1"].value = c1
+
+    def get_mask(self):
+        """Return list of tuples with mask parameters (center, radius)"""
+        return [(np.round(c.center[1],1),np.round(c.center[0],1), np.round(c.radius,1)) for c in self.masks]
+    
+    
