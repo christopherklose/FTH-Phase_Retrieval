@@ -755,9 +755,9 @@ def focusCDI(pos,neg, roi, mask=1,phase=0, prop_dist=0,dx=0, dy=0, scale=(0,100)
                                       description='propagation[um]', style=style)
     slider_phase = widgets.FloatSlider(min=-np.pi, max=np.pi, step=0.001, value=phase, layout=layout,
                                        description='phase shift', style=style)
-    slider_dx = widgets.FloatSlider(min = -4, max = 4, step = 0.01, value = dx, layout = layout,
+    slider_dx = widgets.FloatSlider(min = -6, max = 6, step = 0.01, value = dx, layout = layout,
                                        description = 'x shift', style = style)
-    slider_dy = widgets.FloatSlider(min = -4, max = 4, step = 0.01, value = dy, layout = layout,
+    slider_dy = widgets.FloatSlider(min = -6, max = 6, step = 0.01, value = dy, layout = layout,
                                        description = 'y shift', style = style)
 
     widgets.interact(p, x=slider_prop, y=slider_phase, fx = slider_dx, fy = slider_dy)
