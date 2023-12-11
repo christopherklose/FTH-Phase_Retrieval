@@ -69,7 +69,7 @@ def cimshow(im, **kwargs):
     Returns matplotlib figure and axis created.
     """
     im = np.array(im)
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(7,7))
     im0 = im[0] if len(im.shape) == 3 else im
     mm = ax.imshow(im0, **kwargs)
 
@@ -282,7 +282,7 @@ def intensity_scale(im1, im2, mask=None):
 class AzimuthalIntegrationCenter:
     """Plot image with controls for contrast and center alignment tools."""
 
-    def __init__(self, im, ai, c0=None, c1=None, mask=None,**kwargs):
+    def __init__(self, im, ai, c0=None, c1=None, mask=None,circle_radius=100,**kwargs):
         # User Feedback/Instructions
         print("Left: 1d azimuthal Integration I(q)")
         print("Right: 2d azimuthal Integration I(q,chi)")
@@ -320,23 +320,31 @@ class AzimuthalIntegrationCenter:
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
-        self.fig, self.ax = plt.subplots(1, 2, figsize=(10, 4))
+        self.fig, self.ax = plt.subplots(1, 3, figsize=(12, 4))    
+        # center widget
+        self.ax[0].imshow(im)
+        self.circles = []        
+        for i in range((im.shape[0]//2//circle_radius)):
+            color = 'g' if i == 1 else 'r'
+            circle = plt.Circle([c0, c1], circle_radius * (i + 1), ec=color, fill=False, alpha=0.5)
+            self.circles.append(circle)
+            self.ax[0].add_artist(circle)
         # 1d Ai
-        self.ax[0].plot(self.q_t, self.mI_t)
-        self.ax[0].set_xlim(self.radial_range)
-        self.ax[0].set_xlabel("q in 1/nm")
-        self.ax[0].set_ylabel("Mean Integrated Intensity")
-        self.ax[0].grid()
+        self.ax[1].plot(self.q_t, self.mI_t)
+        self.ax[1].set_xlim(self.radial_range)
+        self.ax[1].set_xlabel("q in 1/nm")
+        self.ax[1].set_ylabel("Mean Integrated Intensity")
+        self.ax[1].grid()
         # 2d Ai
         mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
-        self.timshow = self.ax[1].imshow(self.I_t, vmin=mi, vmax=ma)
-        self.ax[1].set_ylabel("Angle")
-        self.ax[1].set_xlabel("q in px")
-        self.ax[1].grid()
+        self.timshow = self.ax[2].imshow(self.I_t, vmin=mi, vmax=ma)
+        self.ax[2].set_ylabel("Angle")
+        self.ax[2].set_xlabel("q in px")
+        self.ax[2].grid()
 
         # qlines
         for qt in self.qlines:
-            self.ax[1].axvline(qt, ymin=0, ymax=360, c="red")
+            self.ax[2].axvline(qt, ymin=0, ymax=360, c="red")
 
         w_c0 = ipywidgets.FloatSlider(value=c0,min=im.shape[-2]/2-np.round(im.shape[-2]/6),max=im.shape[-2]/2+np.round(im.shape[-2]/6),step=.5, description="y-center",layout=ipywidgets.Layout(width="500px"))
         w_c1 = ipywidgets.FloatSlider(value=c1,min=im.shape[-1]/2-np.round(im.shape[-1]/6),max=im.shape[-1]/2+np.round(im.shape[-1]/6),step=.5, description="x-center",layout=ipywidgets.Layout(width="500px"))
@@ -364,12 +372,17 @@ class AzimuthalIntegrationCenter:
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
+        #plot center
+        for i, c in enumerate(self.circles):
+            c.set_center([c1, c0])
+ 
+        
         # 1d Ai
-        self.ax[0].clear()
-        self.ax[0].plot(self.q_t, self.mI_t)
-        self.ax[0].set_xlabel("q in 1/nm")
-        self.ax[0].set_ylabel("Mean Integrated Intensity")
-        self.ax[0].grid()
+        self.ax[1].clear()
+        self.ax[1].plot(self.q_t, self.mI_t)
+        self.ax[1].set_xlabel("q in 1/nm")
+        self.ax[1].set_ylabel("Mean Integrated Intensity")
+        self.ax[1].grid()
 
         # 2d Ai
         mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
