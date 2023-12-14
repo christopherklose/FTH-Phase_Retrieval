@@ -322,21 +322,24 @@ class AzimuthalIntegrationCenter:
         # Plot
         self.fig, self.ax = plt.subplots(1, 3, figsize=(12, 4))    
         # center widget
-        self.ax[0].imshow(im)
+        mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
+        self.ax[0].imshow(im, vmin=mi, vmax=ma)
         self.circles = []        
+        
         for i in range((im.shape[0]//2//circle_radius)):
             color = 'g' if i == 1 else 'r'
             circle = plt.Circle([c0, c1], circle_radius * (i + 1), ec=color, fill=False, alpha=0.5)
             self.circles.append(circle)
             self.ax[0].add_artist(circle)
+            
         # 1d Ai
         self.ax[1].plot(self.q_t, self.mI_t)
         self.ax[1].set_xlim(self.radial_range)
         self.ax[1].set_xlabel("q in 1/nm")
         self.ax[1].set_ylabel("Mean Integrated Intensity")
         self.ax[1].grid()
+        
         # 2d Ai
-        mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
         self.timshow = self.ax[2].imshow(self.I_t, vmin=mi, vmax=ma)
         self.ax[2].set_ylabel("Angle")
         self.ax[2].set_xlabel("q in px")
