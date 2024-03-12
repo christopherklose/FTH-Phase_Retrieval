@@ -10,6 +10,7 @@ from scipy.constants import c, h, e
 import matplotlib.pyplot as plt
 from matplotlib.widgets import PolygonSelector
 from matplotlib.path import Path
+from matplotlib.patches import Ellipse
 import ipywidgets
 import ipywidgets as widgets
 
@@ -739,9 +740,18 @@ class InteractiveAutoBeamstop:
             
             
 class InteractiveCircleCoordinates:
+    """
+    Creates overlay with circles on an image. Slider allow changing
+    between circles, adjust circle position and radi. Usefull for
+    creating support mask for holographically aided phase retrieval
+
+    Return list of tuples with mask parameters (center, radius)
+    """
     masks = []
 
     def __init__(self, image, num_masks,coordinates=None):
+        print("Use circle index slider to change between circles. The active circle is highlighted in red."
+        )
         print("Right click to move circle to mouse position!")
         self.image = image
         self.num_masks = num_masks
@@ -755,9 +765,8 @@ class InteractiveCircleCoordinates:
                 coordinates.append([self.image.shape[0]/2,self.image.shape[1]/2,10])
                 
         self.masks = [
-            plt.Circle((coordinates[n][1],coordinates[n][0]), coordinates[n][2], fill=False, ec="r") for n in range(self.num_masks)
-        ]
-
+            plt.Circle((coordinates[n][1],coordinates[n][0]), coordinates[n][2], fill=False, ec="r") for n in range(self.num_masks)]
+    
     def draw_gui(self):
         """Create plot and control widgets."""
 
@@ -836,4 +845,134 @@ class InteractiveCircleCoordinates:
         """Return list of tuples with mask parameters (center, radius)"""
         return [(np.round(c.center[1],1),np.round(c.center[0],1), np.round(c.radius,1)) for c in self.masks]
     
+
+class InteractiveEllipseCoordinates:
+    def __init__(self, image, num_masks,coordinates=None):
+        """
+        Creates overlay with ellipses on an image. Sliders allow changing
+        between ellipses, adjust ellipse positions, ellipse sizes and rotation angle. Usefull for
+        creating support mask for holographically aided phase retrieval
     
+        Return list of tuples with mask parameters (center, height, width, angle)
+        """
+
+        print("Use circle index slider to change between circles. The active circle is highlighted in red."
+        )
+        print("Right click to move circle to mouse position!")
+        
+        masks = []
+        self.image = image
+        self.num_masks = num_masks
+        self.init_masks(coordinates)
+        self.draw_gui()
+
+    def init_masks(self,coordinates):
+        if coordinates is None:
+            coordinates = []
+            for n in range(self.num_masks):
+                coordinates.append([(self.image.shape[0]/2,self.image.shape[1]/2),10,10,0])
+
+        self.masks = [Ellipse(coordinates[n][0],coordinates[n][1],coordinates[n][2],angle=coordinates[n][3],fill=False, ec="r") for n in range(self.num_masks)]
+
+    
+    def draw_gui(self):
+        """Create plot and control widgets."""
+
+        # Create figure
+        self.fig, self.ax = plt.subplots(figsize=(6,6))
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
+        self.mm = self.ax.imshow(self.image,vmin=vmin,vmax=vmax,cmap='gray')
+
+        # Add masks to figure
+        for mask in self.masks:
+            self.ax.add_patch(mask)
+            
+        self.widgets = {
+            "contrast": widgets.FloatRangeSlider(
+            value=(vmin, vmax),
+            min=cmin,
+            max=cmax,
+            step=(vmax - vmin) / 500,
+            layout=ipywidgets.Layout(width="500px"),
+            ),
+            "mask_index": widgets.IntSlider(min=0, max=self.num_masks - 1, value=0),
+            "height": widgets.FloatSlider(
+                min=0, max=400, value=10, step=0.5, description="height",layout=ipywidgets.Layout(width="350px"),
+            ),
+            "width": widgets.FloatSlider(
+                min=0, max=400, value=10, step=0.5, description="width",layout=ipywidgets.Layout(width="350px"),
+            ),
+            "angle": widgets.FloatSlider(
+                min=0, max=180, value=0, step=0.5, description="angle",layout=ipywidgets.Layout(width="400px"),
+            ),
+            "c0": widgets.FloatSlider(
+                min=0, max=2048, value=1024, step=0.5, description="x",layout=ipywidgets.Layout(width="400px"),
+            ),
+            "c1": widgets.FloatSlider(
+                min=0, max=2048, value=1024, step=0.5, description="y",layout=ipywidgets.Layout(width="400px"),
+            ),
+        }
+
+        # contrast slider
+        ipywidgets.interact(self.update_plt, contrast=self.widgets["contrast"])
+
+        #update widgets
+        widgets.interact(self.update_controls, index=self.widgets["mask_index"])
+
+        #update Ellipse
+        widgets.interact(
+            self.update_Ellipse,
+            height = self.widgets["height"],
+            width = self.widgets["width"],
+            angle = self.widgets["angle"],
+            c0=self.widgets["c0"],
+            c1=self.widgets["c1"],
+        )
+        
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
+        
+    # Update imshow plot colormap
+    def update_plt(self, contrast):
+        self.mm.set_clim(contrast)
+
+    def update_controls(self, index):
+        """Update control widget values with selected circle parameters."""
+        ellipse = self.masks[index]
+        (c0, c1), height, width, angle = ellipse.center, ellipse.height, ellipse.width, ellipse.angle
+
+        self.widgets["height"].value = height
+        self.widgets["width"].value = width
+
+        self.widgets["angle"].value = angle
+        
+        self.widgets["c0"].value = c0
+        self.widgets["c1"].value = c1
+            
+        for c in self.masks:
+            c.set_edgecolor("g")
+        self.masks[index].set_edgecolor("r")
+
+    def update_Ellipse(self, c0, c1, height, width, angle):
+        """Set center and size of active circle."""
+        index = self.widgets["mask_index"].value
+
+        self.masks[index].set_center((c0, c1))
+        self.masks[index].set_height(height)
+        self.masks[index].set_width(width)
+        self.masks[index].set_angle(angle)
+        
+        print("Aperture Coordinates:")
+        print(self.get_params())
+
+    def onclick_handler(self, event):
+        """Set the center of the active circle to clicked position."""
+        index = self.widgets["mask_index"].value
+        if event.button == 3:  # MouseButton.RIGHT:
+            c0, c1 = (event.xdata, event.ydata)
+            self.masks[index].set_center([c0, c1])
+            self.widgets["c0"].value = c0
+            self.widgets["c1"].value = c1
+
+    def get_params(self):
+        """Return list of tuples with mask parameters (center, height, width, angle)"""
+        return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
