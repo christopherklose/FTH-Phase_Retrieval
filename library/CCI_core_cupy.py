@@ -44,8 +44,9 @@ import cmap as cmap
 import cupy as cp
 import cupyx as cpx
 
+#scipy
 from cupyx.scipy.ndimage import fourier_shift
-
+from cupyx.scipy.ndimage import shift as scipy_shift
 
 #======================
 #Physics
@@ -203,7 +204,7 @@ def circle_mask(shape,center,radius,sigma=None):
 #    return shifted_image_array
 
 
-def shift_image(image,shift,out_dtype = 'numpy'):
+def shift_image(image,shift,interpolation = True,out_dtype = 'numpy'):
     '''
     Shifts image with sub-pixel precission in Fourier space
     
@@ -229,8 +230,12 @@ def shift_image(image,shift,out_dtype = 'numpy'):
     
     #Shift Image
     image = cp.array(image)
-    shift_image = fourier_shift(cp.fft.fft2(image), shift)
-    shift_image = cp.fft.ifft2(shift_image)
+
+    if interpolation is True:
+        shift_image = scipy_shift(image,shift,mode = 'reflect')
+    else:
+        shift_image = fourier_shift(cp.fft.fft2(image), shift)
+        shift_image = cp.fft.ifft2(shift_image)
     
     if out_dtype == 'numpy':
         shift_image = cp.asnumpy(shift_image.real)
