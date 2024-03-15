@@ -316,7 +316,8 @@ class AzimuthalIntegrationCenter:
             unit="q_nm^-1",
             correctSolidAngle=False,
             dummy=np.nan,
-            mask = self.mask
+            mask = self.mask,
+            method = "BBox"
         )
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
