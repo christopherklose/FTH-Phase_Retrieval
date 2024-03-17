@@ -64,6 +64,35 @@ def circle_mask(shape,center,radius,sigma=None):
            
     return mask
 
+
+def shift_image(image,shift):
+    '''
+    Shifts image with sub-pixel precission in Fourier space
+    
+    
+    Parameters
+    ----------
+    image: array
+        Moving image, will be shifted by shift vector
+        
+    shift: vector
+        x and y translation in px
+    
+    Returns
+    -------
+    image_shifted: array
+        Shifted image
+    -------
+    author: CK 2021
+    '''
+    
+    #Shift Image
+    shift_image = fourier_shift(sp.fft.fft2(image,workers=-1), shift)
+    shift_image = sp.fft.ifft2(shift_image,workers=-1)
+    shift_image = shift_image.real
+
+    return shift_image
+
 def cimshow(im, **kwargs):
     """Simple 2d image plot with adjustable contrast.
     
@@ -372,7 +401,8 @@ class AzimuthalIntegrationCenter:
             unit="q_nm^-1",
             correctSolidAngle=False,
             dummy=np.nan,
-            mask = self.mask
+            mask = self.mask,
+            method = "BBox"
         )
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
@@ -977,3 +1007,80 @@ class InteractiveEllipseCoordinates:
     def get_params(self):
         """Return list of tuples with mask parameters (center, height, width, angle)"""
         return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
+    
+    
+class Shift_Scale_Mask:
+    """Plot image with controls for contrast and beamstop alignment tools."""
+    
+    def __init__(self, image, mask):
+        self.image = image
+        self.shape = self.image.shape
+        self.mask_original = mask
+        self.mask = mask
+        self.mask_shifted = mask
+        self.draw_gui()
+        self.shift = [0,0]
+        
+    def draw_gui(self):
+        """Create plot and control widgets."""
+
+        self.fig, self.ax = plt.subplots(1,2,figsize=(10,5),sharex=True,sharey=True)
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
+        self.m0 = self.ax[0].imshow(self.image,vmin=vmin,vmax=vmax)
+        self.m1 = self.ax[1].imshow(self.image,vmin=vmin,vmax=vmax)
+        self.ax[0].set_title("Image*Mask")
+        self.ax[1].set_title("Image*(1-Mask)")
+            
+        self.widgets = {
+            "contrast": widgets.FloatRangeSlider(
+            value=(vmin, vmax),
+            min=cmin,
+            max=cmax,
+            step=(vmax - vmin) / 500,
+            layout=ipywidgets.Layout(width="500px"),
+            ),
+            "shift_ver": widgets.FloatSlider(
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
+            "shift_hor": widgets.FloatSlider(
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
+            "scale": widgets.IntSlider(min=-20, max=20, value=0,description="scale"),
+                    }
+
+        ipywidgets.interact(self.update_plt, contrast=self.widgets["contrast"])
+        widgets.interact(
+            self.update_mask,
+            shift_ver=self.widgets["shift_ver"],
+            shift_hor=self.widgets["shift_hor"],
+            scale=self.widgets["scale"],
+        )
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
+        
+    def scale_mask(self,scale):
+        if scale > 0:
+            footprint = skimage.morphology.disk(scale)
+            hologram_mask = skimage.morphology.dilation(hologram_mask, footprint)
+        elif scale < 0:
+            footprint = skimage.morphology.disk(scale)
+            hologram_mask = skimage.morphology.erode(hologram_mask, footprint)
+            
+    def update_plt(self, contrast):
+        self.m0.set_clim(contrast)
+        self.m1.set_clim(contrast)
+       
+    def update_mask(self, shift_ver,shift_hor,scale):
+        """Shift Mask"""
+        self.shift = [shift_ver,shift_hor]
+        self.mask_shifted = shift_image(self.mask,self.shift)
+        self.m0.set_data(self.image*self.mask_shifted)
+        self.m1.set_data(self.image*(1-self.mask_shifted))
+            
+    def onclick_handler(self, event):
+        """Set the center of the active circle to clicked position."""
+        if event.button == 3:  # MouseButton.RIGHT:
+            c0, c1 = (event.xdata, event.ydata)
+            shift = [self.mask.shape[0]/2-c0,self.mask.shape[0]/2-c1]
+            self.update_mask(shift[0],shift[1],0)
+        
+    def get_mask(self):
+        """Return list of tuples with mask parameters (center, radius)"""
+        return self.mask_shifted, self.shift
