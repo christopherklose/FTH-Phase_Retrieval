@@ -1100,23 +1100,25 @@ class Shift_Scale_Mask:
 class Shift_Scale_Mask:
     """Plot image with controls for contrast, x/y shift and scaling."""
     
-    def __init__(self, image, mask):
+    def __init__(self, image, mask, **kwargs):
         self.image = image
         self.shape = self.image.shape
         self.mask_original = mask
         self.mask = mask
         self.mask_shifted = mask
+        self.kwargs = kwargs
         self.draw_gui()
         self.shift = [0,0]
         self.scale = 0
+
         
     def draw_gui(self):
         """Create plot and control widgets."""
 
         self.fig, self.ax = plt.subplots(1,2,figsize=(10,5),sharex=True,sharey=True)
         cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
-        self.m0 = self.ax[0].imshow(self.image,vmin=vmin,vmax=vmax)
-        self.m1 = self.ax[1].imshow(self.image,vmin=vmin,vmax=vmax)
+        self.m0 = self.ax[0].imshow(self.image,**self.kwargs)
+        self.m1 = self.ax[1].imshow(self.image,**self.kwargs)
         self.ax[0].set_title("Image*Mask")
         self.ax[1].set_title("Image*(1-Mask)")
             
@@ -1207,6 +1209,8 @@ class Shift_Rotate:
         self.ax.set_title("Image")
             
         if self.ticks is not None:
+            plt.xticks(fontsize=7)
+            plt.yticks(fontsize=7)
             self.ax.set_xticks(self.ticks[1])
             self.ax.set_yticks(self.ticks[0])
             plt.grid()
