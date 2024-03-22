@@ -129,7 +129,7 @@ def set_roi(holo, scale = (1,99)):
     return (ROIx1, ROIx2, ROIy1, ROIy2, button)
 
 
-def propagate(holo, ROI, phase=0, prop_dist=0, scale=(0,100), experimental_setup = {'ccd_dist': 18e-2, 'energy': 779.5, 'px_size' : 20e-6}):
+def propagate(holo, ROI, phase=0, prop_dist=0, scale=(0,100), experimental_setup = {'ccd_dist': 18e-2, 'energy': 779.5, 'px_size' : 20e-6}, heraldo = False,heraldo_axis = 0):
     '''
     starts the quest for the right propagation distance and global phase shift.
     Input:  the shifted and masked hologram as returned from recon_allNew
@@ -141,8 +141,16 @@ def propagate(holo, ROI, phase=0, prop_dist=0, scale=(0,100), experimental_setup
     ph_flip = False
     style = {'description_width': 'initial'}
     fig, axs = plt.subplots(1,2)
-    def p(x,y):
-        image = fth.reconstruct(fth.propagate(holo, x*1e-6, experimental_setup = experimental_setup)*np.exp(1j*y))
+    def p(x,y):    
+        if heraldo is True:
+            image = fth.reconstruct(holo)
+            image = np.gradient(image,axis=heraldo_axis)
+            image = fth.FFT(image)
+            image = fth.propagate(image, x*1e-6, experimental_setup = experimental_setup)*np.exp(1j*y)
+            image = fth.reconstruct(image)
+        elif heraldo is False:    
+            image = fth.reconstruct(fth.propagate(holo, x*1e-6, experimental_setup = experimental_setup)*np.exp(1j*y))
+            
         mir, mar = np.percentile(np.real(image[ROI]), scale)
         mii, mai = np.percentile(np.imag(image[ROI]), scale)
 

@@ -418,7 +418,7 @@ def propagate_realspace(image, prop_l, experimental_setup, integer_wl_multiple=T
     author: KG 2020
     '''
     holo = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(image)))
-    holo = propagate(holo, prop_l, ccd_dist = experimental_setup['ccd_dist'], energy = experimental_setup['energy'], integer_wl_multiple = integer_wl_multiple, px_size = experimental_setup['px_size']) 
+    holo = propagate(holo, prop_l, experimental_setup, integer_wl_multiple = integer_wl_multiple) 
     return reconstruct(holo)
 
 ###########################################################################################
