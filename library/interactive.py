@@ -511,7 +511,6 @@ class draw_polygon_mask:
         # Plotting
         fig, self.ax = plt.subplots(figsize= (8,8))
         self.mm = self.ax.imshow(self.image_plot,**self.kwargs)
-        # self.overlay = self.ax.imshow(self.full_mask, alpha=0.2)
         cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.01, 99.99])
 
         sl_contrast = FloatRangeSlider(
@@ -583,6 +582,27 @@ class draw_polygon_mask:
         self.image_plot = self.image * (1 - self.full_mask)
         self.mm.set_data(self.image_plot)
         
+    def round_nested_list(self, nested_list, precision):
+        """
+        Round all values in a nested list to a specified precision.
+
+        Args:
+        nested_list (list): The nested list containing numerical values and/or tuples.
+        precision (int): Number of decimal places to round to (default is 2).
+
+        Returns:
+        list: A new nested list with all values rounded to the specified precision.
+        """
+        
+        if isinstance(nested_list, list):
+            return [self.round_nested_list(item, precision) for item in nested_list]
+        elif isinstance(nested_list, tuple):
+            return tuple(round(value, precision) for value in nested_list)
+        else:
+            return round(nested_list, precision)
+        
+    def get_vertice_coordinates(self):
+        return self.round_nested_list(self.coordinates,1)
         
 class InteractiveAutoBeamstop:
     """Plot image with controls for contrast and beamstop alignment tools."""
