@@ -1,0 +1,34 @@
+name: 2403-cuda_tomo
+channels:
+  - conda-forge
+dependencies:
+  - cuda-version==11.8
+  - python==3.11
+  - numpy==1.25
+  - cupy==12.0
+  - xarray
+  - pycuda==2022.2
+  - ipywidgets
+  - ipympl
+  - scipy
+  - scikit-image
+  - tqdm
+  - scikit-beam
+  - black-jupyter
+  - scikit-learn
+  - numba
+  - dask
+  - dipy
+  - isort
+  - jupyterlab-git
+  - nexusformat
+  - imagemagick
+  - wand
+  - astropy
+  - ccdproc
+  - astra-toolbox::astra-toolbox
+  - tomopy
+  - libtomo[build=cuda*]
+  - dxchange
+  - pyfai
+prefix: /data/export/venv/2403-cuda_tomo_test
