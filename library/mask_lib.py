@@ -82,7 +82,7 @@ def create_single_polygon_mask(shape, coordinates):
     author: ck 2023
     """
 
-    x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+    x, y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
     x, y = x.flatten(), y.flatten()
 
     points = np.vstack((x, y)).T
@@ -145,17 +145,20 @@ def load_poly_masks(shape, mask_dict, polygon_name_list):
     author: ck 2023
     """
 
-    mask = []
+    if len(polygon_name_list) > 0:
+        mask = []
 
-    # Loop over relevant mask keys
-    for polygon_name in polygon_name_list:
-        coord = mask_dict[polygon_name]
-        mask.append(create_polygon_mask(shape, coord).astype(float))
+        # Loop over relevant mask keys
+        for polygon_name in polygon_name_list:
+            coord = mask_dict[polygon_name]
+            mask.append(create_polygon_mask(shape, coord).astype(float))
 
-    # Combine all individual mask layers
-    mask = np.array(mask)
-    mask = np.sum(mask, axis=0)
-    mask[mask > 1] = 1
+        # Combine all individual mask layers
+        mask = np.array(mask)
+        mask = np.sum(mask, axis=0)
+        mask[mask > 1] = 1
+    else:
+        mask = np.zeros(shape)
 
     return mask
 
