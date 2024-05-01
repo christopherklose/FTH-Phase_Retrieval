@@ -147,11 +147,12 @@ class InteractiveCenter:
             self.circles.append(circle)
             self.ax.add_artist(circle)
 
-        w_c0 = ipywidgets.IntText(value=c0,step = 0.5, description="c0 (vert)")
-        w_c1 = ipywidgets.IntText(value=c1,step = 0.5, description="c1 (hor)")
-        w_rBS = ipywidgets.IntText(value=rBS, description="rBS")
+        self.widgets = { "w_c0" :ipywidgets.IntText(value=c0,step = 0.5, description="c0 (vert)"),
+        "w_c1" : ipywidgets.IntText(value=c1,step = 0.5, description="c1 (hor)"),
+        "w_rBS" : ipywidgets.IntText(value=rBS, description="rBS")}
         
-        ipywidgets.interact(self.update, c0=w_c0, c1=w_c1, r=w_rBS)
+        ipywidgets.interact(self.update, c0=self.widgets["w_c0"], c1=self.widgets["w_c1"], r=self.widgets["w_rBS"])
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
     
     def update(self, c0, c1, r):
         self.c0 = c0
@@ -160,6 +161,15 @@ class InteractiveCenter:
         for i, c in enumerate(self.circles):
             c.set_center([c1, c0])
             c.set_radius(r * (i + 1))
+            
+    def onclick_handler(self, event):
+        """Set the center of the active circle to clicked position."""
+        if event.button == 3:  # MouseButton.RIGHT:
+            c1, c0 = (event.xdata, event.ydata)
+            self.widgets["w_c0"].value = int(c0)
+            self.widgets["w_c1"].value = int(c1)
+            self.update(int(c0),int(c1),self.rBS)
+                       
 
 def axis_to_roi(axis, labels=None):
     """
@@ -459,14 +469,17 @@ class InteractiveBeamstop:
         #Change beamstop parameter
         w_rBS = ipywidgets.IntText(value=self.rBS, description="radius")
         w_std = ipywidgets.IntText(value=self.stdBS, description="smoothing")
-        ipywidgets.interact(self.update_bs, r=w_rBS,std = w_std)
+        w_c0 = ipywidgets.IntText(value=self.center[0], description="c0 (vert)")
+        w_c1 = ipywidgets.IntText(value=self.center[1], description="c1 (horz)")
+        ipywidgets.interact(self.update_bs, r=w_rBS,std = w_std, c0 = w_c0, c1 = w_c1)
     
     #Update plot
     def update_plt(self,contrast):
         self.mm.set_clim(contrast)
     
     #Update bs
-    def update_bs(self, r,std):
+    def update_bs(self, r,std, c0, c1):
+        self.center = [c0,c1]
         self.rBS = r
         self.stdBS = std
         self.mask_bs = 1 - circle_mask(
