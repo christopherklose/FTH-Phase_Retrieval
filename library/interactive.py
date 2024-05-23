@@ -58,7 +58,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if sigma != None:
+    if np.logical_or(sigma != None,sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
@@ -1133,16 +1133,16 @@ class Shift_Scale_Mask:
 class Shift_Scale_Mask:
     """Plot image with controls for contrast, x/y shift and scaling."""
     
-    def __init__(self, image, mask, **kwargs):
+    def __init__(self, image, mask, shift = [0,0], scale = 0, **kwargs):
         self.image = image
         self.shape = self.image.shape
         self.mask_original = mask
         self.mask = mask
         self.mask_shifted = mask
+        self.shift = shift
+        self.scale = scale
         self.kwargs = kwargs
         self.draw_gui()
-        self.shift = [0,0]
-        self.scale = 0
 
         
     def draw_gui(self):
@@ -1164,10 +1164,10 @@ class Shift_Scale_Mask:
             layout=ipywidgets.Layout(width="500px"),
             ),
             "shift_ver": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[0], step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
             "shift_hor": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
-            "scale": widgets.IntSlider(min=-20, max=20, value=0,description="scale"),
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[1], step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
+            "scale": widgets.IntSlider(min=-20, max=20, value=self.scale,description="scale"),
                     }
 
         ipywidgets.interact(self.update_plt_contrast, contrast=self.widgets["contrast"])

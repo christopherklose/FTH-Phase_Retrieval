@@ -40,8 +40,6 @@ from sklearn.metrics import pairwise_distances
 
 #colormap
 from matplotlib.colors import LinearSegmentedColormap
-import cmap as cmap
-
 
 #======================
 #Physics
