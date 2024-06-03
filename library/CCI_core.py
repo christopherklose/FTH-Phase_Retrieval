@@ -1,5 +1,5 @@
 """
-Python Dictionary for CCI correlaion analysis
+Python library for CCI correlaion analysis
 
 2022/23
 @authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)

@@ -138,7 +138,42 @@ def binning(array, binning_factor):
     new_array = array.reshape(shape).mean(-1).mean(1)
     return new_array
 
+def make_square_shape(images):
+    """Crops last two dimenions of n-d images to square shape"""
+    crop = np.min(np.array([images.shape[-2], images.shape[-1]]))
+    images = images[..., :crop, :crop]
+
+    return images
+
+def drop_inhomogenous_part(image_list):
+    """
+    Drops inhomogenous_parts of list of image stacks, i.e, drops length
+    of image stacks to smallest share for creation of numpy array
+    """
+    # Find length of all image_list stacks
+    length = np.array([im.shape[0] for im in image_list])
+    max_stack_size = np.min(length)
+
+    # Check if array is inhomogenous
+    if np.all(length == max_stack_size) is False:
+        print("Dropping inhomogenous part of array")
+        for i in range(len(image_list)):
+            image_list[i] = image_list[i][:max_stack_size]
+
+    return image_list
 
 #=========================
 # Other
 #=========================
+
+def flatten_list(nested_list):
+    """
+    Convert nested list into single list
+    """
+    flat_list = []
+    for item in nested_list:
+        if isinstance(item, list):
+            flat_list.extend(flatten_list(item))
+        else:
+            flat_list.append(item)
+    return flat_list
