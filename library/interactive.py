@@ -122,6 +122,80 @@ def cimshow(im, **kwargs):
     
     return fig, ax
 
+class cimshow_class:
+    widgets = {}
+    def __init__(self, im, kwargs=None):
+        self.im = np.array(im).astype("float")
+        self.fig, self.ax = plt.subplots(figsize=(7,7))
+        self.im0 = im[0] if len(im.shape) == 3 else im
+        
+        self.cmin, self.cmax, self.vmin, self.vmax = np.nanpercentile(self.im, [.1, 99.9, .001, 99.999])
+        
+        
+        self.kwargs = kwargs
+        self.make_ui()
+        
+        
+        
+    def make_ui(self):
+        if self.kwargs is None:
+            self.mm = self.ax.imshow(self.im0)
+        else:
+            self.mm = self.ax.imshow(self.im0, **self.kwargs)
+        
+        self.widgets["clim"] = FloatRangeSlider(
+        value=(self.cmin, self.cmax), min=self.vmin, max=self.vmax, step=(self.vmax - self.vmin) / 500,
+        layout=ipywidgets.Layout(width='500px'),
+        )
+        if len(self.im.shape) == 3:
+            self.widgets["nr"]  = IntSlider(value=0, min=0, max=self.im.shape[0] - 1)
+            interact(self.change_im, im_num=self.widgets["nr"])
+        
+        interact(self.update_clim, clim=self.widgets["clim"])
+        
+    
+    def update_clim(self, clim):
+        self.mm.set_clim(clim)
+        
+    def change_im(self, im_num):
+        self.mm.set_data(self.im[im_num])
+        
+        
+        
+        
+        
+def cimshow_return_indices(im, **kwargs):
+    """Simple 2d image plot with adjustable contrast.
+    
+    Returns matplotlib figure and axis created.
+    """
+    im = np.array(im).astype("float")
+    fig, ax = plt.subplots(figsize=(7,7))
+    im0 = im[0] if len(im.shape) == 3 else im
+    mm = ax.imshow(im0, **kwargs)
+
+    cmin, cmax, vmin, vmax = np.nanpercentile(im, [.1, 99.9, .001, 99.999])
+    # vmin, vmax = np.nanmin(im), np.nanmax(im)
+    sl_contrast = FloatRangeSlider(
+        value=(cmin, cmax), min=vmin, max=vmax, step=(vmax - vmin) / 500,
+        layout=ipywidgets.Layout(width='500px'),
+    )
+
+    @ipywidgets.interact(contrast=sl_contrast)
+    def update(contrast):
+        mm.set_clim(contrast)
+    
+    if len(im.shape) == 3:
+        w_image = IntSlider(value=0, min=0, max=im.shape[0] - 1)
+        @ipywidgets.interact(nr=w_image)
+        def set_image(nr):
+            mm.set_data(im[nr])
+        return fig, ax, {"contrast":sl_contrast, "image_number":w_image }
+    
+    if len(im.shape) == 2:
+        return fig, ax, {"contrast":sl_contrast}
+
+
 
 class InteractiveCenter:
     """Plot image with controls for contrast and beamstop alignment tools."""
@@ -493,16 +567,25 @@ class draw_polygon_mask:
     """Interactive drawing of polygon masks"""
 
     def __init__(self, image,**kwargs):
-        self.image = image
-        self.image_plot = image
-        self.full_mask = np.zeros(image.shape)
+        self.frame_index = 0
+        self.images = image
+        
+        if self.images.ndim == 3:
+            self.image = self.images[self.frame_index]
+        else:
+            self.image = self.images
+            
+        self.image_plot = self.image
+        self.full_mask = np.zeros(self.image.shape)
         self.coordinates = []
         self.masks = []
         self._create_widgets()
         self.kwargs = kwargs
         self.draw_gui()
+        self.update_plt_images(0)
 
     def _create_widgets(self):
+        
         self.button_add = ipywidgets.Button(
             description="Add mask",
             button_style="warning",
@@ -524,7 +607,7 @@ class draw_polygon_mask:
         # Plotting
         fig, self.ax = plt.subplots(figsize= (8,8))
         self.mm = self.ax.imshow(self.image_plot,**self.kwargs)
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.01, 99.99])
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.images, [0.01, 99.99, 0.01, 99.99])
 
         sl_contrast = FloatRangeSlider(
             value=(cmin, cmax),
@@ -534,6 +617,10 @@ class draw_polygon_mask:
             layout=ipywidgets.Layout(width="500px"),
         )
         cim = ipywidgets.interact(self.update_plt, contrast=sl_contrast)
+        
+        if self.images.ndim == 3:
+            im_nr = IntSlider(value=self.frame_index, min=0, max=self.images.shape[0]-1)
+            ipywidgets.interact(self.update_plt_images, frame_index=im_nr)
 
         # How to use
         print("Click on the figure to create a polygon corner.")
@@ -552,6 +639,12 @@ class draw_polygon_mask:
     # Update plot
     def update_plt(self, contrast):
         self.mm.set_clim(contrast)
+        
+    def update_plt_images(self,frame_index):
+        self.frame_index = frame_index
+        self.image = self.images[frame_index]
+        self.image_plot = self.image * (1 - self.full_mask)
+        self.mm.set_data(self.image_plot)   
 
     def reset_polygon_selector(self):
         self.selector = PolygonSelector(

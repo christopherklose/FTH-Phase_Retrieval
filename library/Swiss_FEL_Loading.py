@@ -24,7 +24,9 @@ import numpy as np
 mnemonics = dict()
 mnemonics["Photon-Energy-PER-PULSE-AVG"] = "SATFE10-PEPG046:PHOTON-ENERGY-PER-PULSE-AVG"
 mnemonics["images"] = "SATES20-HOLO-CAM01:FPICTURE"
-mnemonics["APD"] = "SATES21-GES1:A2_VALUES"
+mnemonics["I0_intensity_Ar"] = "SATES21-GES1:A2_VALUES"
+mnemonics["Diode"] = "SATES21-GES1:A4_VALUES"
+mnemonics["photonenergy"] = "SATOP11-OSGM087:photonenergy"
 
 def load_mnemonics():
     """Return mnemonics dictionary"""
@@ -143,7 +145,9 @@ def list_acquisition_filenames(run_nr,BASEFOLDER, acq_nrs=[], ONLY_CAMERA=False)
 
     # If for run_nr is only gives a int number
     if type(run_nr) == int:
-        run_nr = "*%04d*" % run_nr
+        run_nr = "*%04d*" % int(run_nr)
+    elif type(run_nr) == float:
+        run_nr = "*%04d*" % int(run_nr)
 
     # If list is empty all files are loaded, only specific acquisition nrs
     # otherwise
@@ -178,7 +182,7 @@ def load_run(fnames, mnemonics):
 
     data = dict()
     N = len(fnames)
-
+    
     with SFDataFiles(fnames[0]) as f:
         for key in mnemonics.keys():
             try:
@@ -193,6 +197,7 @@ def load_run(fnames, mnemonics):
                         data[key] = np.concatenate((data[key], f[mnemonics[key]].data))
                     except:
                         pass
+    
     return data
 
 

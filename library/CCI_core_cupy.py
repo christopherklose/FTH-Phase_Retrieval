@@ -206,7 +206,7 @@ def shift_image(image,shift,interpolation = True,out_dtype = 'numpy'):
 
 
 
-def shift_image_stack(image_stack,shift,chunk_sz = 'none'):
+def shift_image_stack(image_stack,shift,chunk_sz = None):
     '''
     Shifts all images of a stack with sub-pixel precission in Fourier space
     
@@ -234,7 +234,7 @@ def shift_image_stack(image_stack,shift,chunk_sz = 'none'):
         print('Warning: This is only a single 2d image!')
         image_stack = shift_image(image_stack, shift)
     elif image_stack.ndim == 3:
-        if chunk_sz == 'none':        
+        if chunk_sz is None:        
             #Shift Image
             for frame in tqdm(range(image_stack.shape[0])):
                 image_stack[frame] = shift_image(image_stack[frame], shift[frame])
