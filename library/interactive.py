@@ -567,25 +567,16 @@ class draw_polygon_mask:
     """Interactive drawing of polygon masks"""
 
     def __init__(self, image,**kwargs):
-        self.frame_index = 0
-        self.images = image
-        
-        if self.images.ndim == 3:
-            self.image = self.images[self.frame_index]
-        else:
-            self.image = self.images
-            
-        self.image_plot = self.image
-        self.full_mask = np.zeros(self.image.shape)
+        self.image = image
+        self.image_plot = image
+        self.full_mask = np.zeros(image.shape)
         self.coordinates = []
         self.masks = []
         self._create_widgets()
         self.kwargs = kwargs
         self.draw_gui()
-        self.update_plt_images(0)
 
     def _create_widgets(self):
-        
         self.button_add = ipywidgets.Button(
             description="Add mask",
             button_style="warning",
@@ -607,7 +598,7 @@ class draw_polygon_mask:
         # Plotting
         fig, self.ax = plt.subplots(figsize= (8,8))
         self.mm = self.ax.imshow(self.image_plot,**self.kwargs)
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.images, [0.01, 99.99, 0.01, 99.99])
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.01, 99.99])
 
         sl_contrast = FloatRangeSlider(
             value=(cmin, cmax),
@@ -617,10 +608,6 @@ class draw_polygon_mask:
             layout=ipywidgets.Layout(width="500px"),
         )
         cim = ipywidgets.interact(self.update_plt, contrast=sl_contrast)
-        
-        if self.images.ndim == 3:
-            im_nr = IntSlider(value=self.frame_index, min=0, max=self.images.shape[0]-1)
-            ipywidgets.interact(self.update_plt_images, frame_index=im_nr)
 
         # How to use
         print("Click on the figure to create a polygon corner.")
@@ -639,12 +626,6 @@ class draw_polygon_mask:
     # Update plot
     def update_plt(self, contrast):
         self.mm.set_clim(contrast)
-        
-    def update_plt_images(self,frame_index):
-        self.frame_index = frame_index
-        self.image = self.images[frame_index]
-        self.image_plot = self.image * (1 - self.full_mask)
-        self.mm.set_data(self.image_plot)   
 
     def reset_polygon_selector(self):
         self.selector = PolygonSelector(
