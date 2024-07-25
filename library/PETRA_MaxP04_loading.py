@@ -93,7 +93,7 @@ def generate_filename(raw_folder, file_prefix, file_format, scan_nr):
     
 
 # Load any kind of data from measurements
-def load_data(fname, keypath, key_list = None):
+def load_data(fname, keypath, keys = None):
     """
     Load any kind of data from 
     
@@ -103,8 +103,8 @@ def load_data(fname, keypath, key_list = None):
         filename of data file
     keypath : str
         path of nexus file tree to relevant data field
-    field : list of str
-        list of keys to load from keypath
+    keys : str or list of strings
+        keys to load from keypath
         
     Output
     ======
@@ -119,13 +119,16 @@ def load_data(fname, keypath, key_list = None):
         data = {}
 
         # Load all keys of path
-        if key_list == None:
+        if keys == None:
             for key in f[keypath].keys():
                 data[key] = f[keypath][key][()]
         # Load only keys from key list
-        elif isinstance(key_list, list):
-            for key in key_list:
+        elif isinstance(keys, list):
+            for key in keys:
                 data[key] = f[keypath][key][()]
+        # Load only single key
+        else:
+            data[keys] = f[keypath][keys][()]
 
     return data
 
@@ -179,6 +182,6 @@ def load_images(fname):
     """
 
     # Load only relevant image data
-    data = load_data(fname, mnemonics["data"], key_list = [mnemonics["images"]])
+    data = load_data(fname, mnemonics["data"], keys = [mnemonics["images"]])
 
     return data[mnemonics["images"]].squeeze()
