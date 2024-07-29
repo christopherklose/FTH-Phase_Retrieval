@@ -58,7 +58,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if np.logical_or(sigma != None,sigma != 0):
+    if np.logical_and(sigma != None,sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
@@ -750,10 +750,10 @@ class InteractiveAutoBeamstop:
         # Draw beamstop only up to given radius
         hologram_mask = hologram_mask * circle_mask(
             hologram_mask.shape,
-            [hologram_mask.shape[0] / 2, hologram_mask.shape[1] / 2 - 3],
+            np.array(hologram_mask.shape)/2,
             radius,
-            sigma=None,
-        )
+            sigma = None,
+       )
 
         return hologram_mask
 

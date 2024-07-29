@@ -1,6 +1,15 @@
 import numpy as np
 from matplotlib.path import Path
+
+# scipy
+import scipy as sp
 from scipy.ndimage.filters import gaussian_filter
+
+# dipy
+from dipy.segment.mask import median_otsu
+
+# skimage
+import skimage.morphology
 
 # Is there a GPU?
 try:
@@ -56,7 +65,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if sigma != None:
+    if np.logical_and(sigma != None,sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
@@ -325,3 +334,114 @@ def create_ellipse_supportmask(support_coordinates, shape):
         supportmask[yy, xx] = 1
 
     return supportmask
+
+
+def automated_beamstop_center(image, threshold, radius, expand, method = "intensity"):
+    """
+    Automatically determine beamstop close to center using otsu thresholding
+
+    Parameter
+    =========
+    image: array
+        image with beamstop
+    threshold: float
+        threshold value for filtering according to method
+    radius: float
+        determines mask only up to this radius (from center)
+    expand: int
+        shrink or expand mask by given nr of pixels
+    method: str
+        thresholding method to find mask ("intensity", "gradient", "otsu")
+
+    Output
+    ======
+    mask: array
+        binary mask
+    ======
+    author: ck 2023
+    """
+    
+    # Different methods for filtering of beamstop
+    if method == "intensity":
+        # Some image preprocessing
+
+        # Thresholding of gradient
+        mask = image < threshold
+
+    elif method == "gradient":
+        # Some image preprocessing
+        image = np.mean(np.abs(np.gradient(image)), axis=0)
+
+        # Thresholding of gradient
+        mask = image < threshold
+
+    elif method == "otsu":
+        # Some image preprocessing
+        image[image<0]=0
+        image = image +1 
+        image = np.log10(image)
+
+        # Prepare raw mask using otsu threshold method
+        _, mask = median_otsu(image, median_radius=1, numpass=1)
+
+    # Postprocessing
+    mask = mask_postprocessing(mask, radius, expand)
+    
+
+    return mask
+
+
+def mask_postprocessing(mask, radius, expand):
+    """
+    helper function for automated_beamstop_center for clean up
+    of raw thresholding mask
+
+    Parameter
+    =========
+    mask: array
+        raw thresholding mask
+    radius: float
+        determines mask only up to this radius (from center)
+    expand: int
+        shrink or expand mask by given nr of pixels
+
+    Output
+    ======
+    mask: array
+        binary mask
+    ======
+    author: ck 2023
+    """
+    
+    # Draw beamstop only up to given radius
+    mask = mask * circle_mask(
+        mask.shape,
+        [mask.shape[0] / 2, mask.shape[1] / 2],
+        radius,
+        sigma=None,
+    )
+    mask = mask.astype(bool)
+
+    # Morphological operations to filter reference modulations as these also lead to strong intensity gradients
+    # close the "dots" of the ref modulations
+    footprint = skimage.morphology.disk(2)
+    mask = skimage.morphology.erosion(mask, footprint)
+
+    # Filter remainings of ref modulations
+    mask = skimage.morphology.remove_small_objects(
+        mask, min_size=1000
+    )
+    mask = 1 - skimage.morphology.remove_small_objects(
+        (1 - mask).astype(bool), min_size=1000
+    )
+
+    # Expand Mask
+    footprint = skimage.morphology.disk(expand)
+    mask = skimage.morphology.dilation(mask, footprint)
+
+    # Fill up small holes in the mask
+    mask = sp.ndimage.binary_fill_holes(
+        mask, structure=np.ones((5, 5))
+    )
+    
+    return mask
