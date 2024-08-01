@@ -230,8 +230,8 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0):
     N = len(fnames)
 
     # Cropping necessary?
-    if crop == 0:
-        slice_crop = slice(0, -1)
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
     else:
         slice_crop = slice(crop, -crop)
 
@@ -262,7 +262,7 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0):
     return np.array(helper.drop_inhomogenous_part(images))
 
 
-def load_specific_frames(fnames, indexes, crop=0):
+def load_specific_frames(fnames, indexes, crop=None):
     """
     Load only specific frames for a list of acquisition filenames
     
@@ -272,8 +272,8 @@ def load_specific_frames(fnames, indexes, crop=0):
         list of image acquisition filenames
     indexes : nested list
         relevant frames indexes of a given fname
-    crop : int
-        crops images symmtrically by "crop" number of pixels
+    crop : int or None
+        crops images symmtrically by "crop" number of pixels [crop:-crop]
         
     Output
     ======
@@ -287,8 +287,8 @@ def load_specific_frames(fnames, indexes, crop=0):
     images = []
 
     # Cropping necessary?
-    if crop == 0:
-        slice_crop = slice(0, -1)
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
     else:
         slice_crop = slice(crop, -crop)
 
