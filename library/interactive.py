@@ -711,10 +711,10 @@ class InteractiveAutoBeamstop:
 
         # Filter remainings of ref modulations
         hologram_mask = skimage.morphology.remove_small_objects(
-            hologram_mask, min_size=2000
+            hologram_mask, min_size=500
         )
         hologram_mask = 1 - skimage.morphology.remove_small_objects(
-            (1 - hologram_mask).astype(bool), min_size=2000
+            (1 - hologram_mask).astype(bool), min_size=500
         )
 
         # Expand Mask

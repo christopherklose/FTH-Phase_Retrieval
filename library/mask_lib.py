@@ -429,10 +429,10 @@ def mask_postprocessing(mask, radius, expand):
 
     # Filter remainings of ref modulations
     mask = skimage.morphology.remove_small_objects(
-        mask, min_size=1000
+        mask, min_size=500
     )
     mask = 1 - skimage.morphology.remove_small_objects(
-        (1 - mask).astype(bool), min_size=1000
+        (1 - mask).astype(bool), min_size=500
     )
 
     # Expand Mask

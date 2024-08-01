@@ -12,12 +12,16 @@ import time
 from os.path import join
 from os import path
 from glob import glob
+from collections import defaultdict
+
 from tqdm.auto import tqdm
 from joblib import Parallel, delayed
-from sfdata import SFDataFiles
-import helper_functions as helper
 
 import numpy as np
+
+from sfdata import SFDataFiles, SFScanInfo, SFProcFile
+import helper_functions as helper
+
 
 
 # Commonly used hdf5 entries. SwissFEL specific
@@ -79,7 +83,7 @@ def list_data_filenames(run_nr,BASEFOLDER,  search_key="*"):
     
     Parameter
     =========
-    run_nr : int 
+    run_nr : int or str
         identifier of experiment run
     BASEFOLDER : int
         general beamtime folder
@@ -230,8 +234,8 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0):
     N = len(fnames)
 
     # Cropping necessary?
-    if crop == 0:
-        slice_crop = slice(0, -1)
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
     else:
         slice_crop = slice(crop, -crop)
 
@@ -262,7 +266,7 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0):
     return np.array(helper.drop_inhomogenous_part(images))
 
 
-def load_specific_frames(fnames, indexes, crop=0):
+def load_specific_frames(fnames, indexes, crop=None):
     """
     Load only specific frames for a list of acquisition filenames
     
@@ -272,8 +276,8 @@ def load_specific_frames(fnames, indexes, crop=0):
         list of image acquisition filenames
     indexes : nested list
         relevant frames indexes of a given fname
-    crop : int
-        crops images symmtrically by "crop" number of pixels
+    crop : int or None
+        crops images symmtrically by "crop" number of pixels [crop:-crop]
         
     Output
     ======
@@ -287,8 +291,8 @@ def load_specific_frames(fnames, indexes, crop=0):
     images = []
 
     # Cropping necessary?
-    if crop == 0:
-        slice_crop = slice(0, -1)
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
     else:
         slice_crop = slice(crop, -crop)
 
@@ -300,6 +304,60 @@ def load_specific_frames(fnames, indexes, crop=0):
         images.append(image)
 
     return np.vstack(images)
+
+
+# Full image loading procedure
+def load_processing(im_id, binning=1, crop=0):
+    """
+    Loads all images, averaging over all images,
+    padding to square shape, binning, Additional cropping (optional) etc.
+
+    Parameter
+    =========
+    im_id : int
+        image data identifier number
+    crop : int
+        crops image arrays according to array[:crop, :crop]
+
+    Output
+    ======
+    files : list
+        list of searched filenames
+    ======
+    author: ck 2024
+    """
+
+    # Load image or list of images
+    images = []
+    if isinstance(im_id, list):
+        for idx in im_id:
+            ids = sfl.list_acquisition_filenames(
+                int(idx), BASEFOLDER, acq_nrs=[], ONLY_CAMERA=True
+            )
+            image, _ = sfl.load_processing_frames(
+                ids, loadmode="avg", crop=crop, nr_jobs=NR_JOBS
+            )
+            images.append(image)
+        images = np.stack(images)
+        image = np.mean(images, axis=0)
+    else:
+        ids = sfl.list_acquisition_filenames(
+            im_id, BASEFOLDER, acq_nrs=[], ONLY_CAMERA=True
+        )
+        image, _ = sfl.load_processing_frames(
+            ids, loadmode="avg", crop=crop, nr_jobs=NR_JOBS
+        )
+        images = image.copy()
+
+    # Zeropad to get square shape
+    image = helper.padding(image)
+    images = helper.padding(images)
+
+    # Binning
+    image = helper.binning(image, binning)
+    images = helper.binning(images, binning)
+
+    return image, images
 
 
 # Full image loading procedure
@@ -347,3 +405,115 @@ def load_processing_frames(fnames, loadmode="avg", crop=0, frame_index_list=[],n
         image = images.copy()
 
     return image, images
+
+
+def load_readback(run_nr, BASEFOLDER):
+    """
+    Loads readback values from scan data files, i.e., parameter values for an energy
+    or fluence scan
+
+    Parameter
+    =========
+    run_nr : int or str
+        identifier of experiment run
+    BASEFOLDER : int
+        general beamtime folder
+
+    Output
+    ======
+    read_back_value : array
+        actual scan parameter which was read out / reached
+    set_values: array
+        set values of the parameter
+    ======
+    author: ck 2024
+    """
+    
+    # Get data folder of run_nr
+    _, folder = list_data_filenames(run_nr, BASEFOLDER, search_key="*PVDATA*")
+    
+    # Load read back and set values from .json files
+    read_back_values = SFScanInfo(folder + "/meta/scan.json").readbacks
+    set_values = SFScanInfo(folder + "/meta/scan.json").values
+
+    return read_back_values, set_values
+
+
+def drop_faulty_acquisitions(run_nr, BASEFOLDER):
+    """
+    In case that the FEL is down during a scan, the scan will pause. When the FEL is back
+    up again, the latest scan point will be repeated and then the scan continues as normal.
+    This leads to multiple scans points for identical parameter set values.
+    
+    This function drops all scan points of aborted scans and returns readback value indices of
+    valid read back values.
+
+    Parameter
+    =========
+    run_nr : int or str
+        identifier of experiment run
+    BASEFOLDER : int
+        general beamtime folder
+
+    Output
+    ======
+    new_indices : array
+        indices of valid read back values for indexing
+    ======
+    author: ck 2024
+    """
+    
+    # Get readback set values
+    _, readback_values = load_readback(run_nr, BASEFOLDER)
+
+    # Find douplicates in readback values
+    duplicates, singuletts = find_duplicates_with_indices(readback_values)
+
+    # Combine relevant acquisitions
+    new_indices = []
+    for key, values in duplicates.items():
+        new_indices.append(values[-1])
+
+    # Return as numpy array with adjusted acquisition values
+    new_indices = sorted(helper.flatten_list([list(singuletts.values()), new_indices]))
+    new_indices = np.array(new_indices) + 1
+    
+    return new_indices
+
+
+def find_duplicates_with_indices(numbers):
+    """
+    Helper function for drop_faulty_acquisitions. Finds duplicates in a list of float numbers and returns them along with their indices.
+
+    Parameter
+    =========
+    numbers : list or array
+        list or array of numbers with duplicates and singuletts
+
+    Output
+    ======
+    duplicates : dict
+        key is the value of a duplicate in numbers, key value are indices of duplicate in numbers 
+    singuletts: dict
+        key is the value of a singuletts in numbers, key value are indices of singuletts in numbers 
+    ======
+    author: ck 2024
+    """
+
+
+    # Dictionary to track the indices of each number
+    indices_dict = defaultdict(list)
+
+    # Populate the dictionary with indices for each number
+    for index, number in enumerate(numbers):
+        indices_dict[number].append(index)
+
+    # Filter out non-duplicates and keep only the duplicates
+    duplicates = {
+        number: indices for number, indices in indices_dict.items() if len(indices) > 1
+    }
+    singuletts = {
+        number: indices for number, indices in indices_dict.items() if len(indices) == 1
+    }
+
+    return duplicates, singuletts

@@ -108,35 +108,62 @@ def fill_infs_nans(array,fill_value = 0):
     
     
 def binning(array, binning_factor):
-    '''
+    """
     Bins images: new_shape = old_shape/binning_factor
-    
+
     Parameter
     =========
-    array : numpy array
-        input array
+    array : 2d or 3d numpy array
+        last two dimension will be binned
     binning_factor : int
-        new_shape = old_shape/binning_factor
-        
+        new_shape = old_shape/binning_factor for last two dimensions
+
     Output
     ======
     new_array : numpy array
         binned array
     ======
-    author: ck 2023
-    
-    '''
-    new_shape = (np.array(array.shape) / binning_factor).astype(int)
+    author: ck 2023/24
 
-    shape = (
-        new_shape[0],
-        array.shape[0] // new_shape[0],
-        new_shape[1],
-        array.shape[1] // new_shape[1],
-    )
-    
-    new_array = array.reshape(shape).mean(-1).mean(1)
-    return new_array
+    """
+
+    # Only if binning factor is relevant
+    if binning_factor != 1:
+        # Binning function is supposed to bin only the last two dimensions
+        # 2d case
+        if array.ndim == 2:
+            new_shape = (np.array(array.shape) // binning_factor).astype(int)
+            shape = (
+                new_shape[0],
+                array.shape[0] // new_shape[0],
+                new_shape[1],
+                array.shape[1] // new_shape[1],
+            )
+            new_array = array.reshape(shape).mean(-1).mean(1)
+            return new_array
+        # 3d case
+        elif array.ndim == 3:
+            new_shape = np.array(
+                (
+                    array.shape[0],
+                    array.shape[1] // binning_factor,
+                    array.shape[2] // binning_factor,
+                )
+            ).astype(int)
+
+            shape = (
+                new_shape[0],
+                new_shape[1],
+                array.shape[1] // new_shape[1],
+                new_shape[2],
+                array.shape[2] // new_shape[2],
+            )
+            new_array = array.reshape(shape).mean(-1).mean(2)
+
+            return new_array
+
+    elif binning_factor == 1:
+        return array
 
 def make_square_shape(images):
     """Crops last two dimenions of n-d images to square shape"""
