@@ -58,7 +58,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if np.logical_or(sigma != None,sigma != 0):
+    if np.logical_and(sigma != None,sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
