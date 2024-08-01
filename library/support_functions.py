@@ -9,6 +9,8 @@ import sys, os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from wand.image import Image
+
 #=====================
 #Paths and directories
 #=====================
@@ -142,3 +144,56 @@ def binning(array, binning_factor):
 #=========================
 # Other
 #=========================
+def create_gif(image_filenames, output_gif,fps = 1,loop = 0):
+    '''
+    creates gif from list of images or folder
+    
+    Parameter
+    =========
+    array : str or list of str
+        path or list of paths (files and/or folder)
+    output_gif : str
+        output filename
+    fps : scalar
+        framerate
+    loop : scalar
+        nr of repetitions (0 => inf)
+        
+    Output
+    ======
+        gif in specified path
+    ======
+    author: ck 2024
+    
+    '''
+    
+    images = []
+
+    #Check if input is list or str
+    if isinstance(image_filenames,str):
+        image_filenames = [image_filenames]
+
+    with Image() as img:
+        # Load all specified images
+        for path in image_filenames:
+            if os.path.isfile(path):
+                #Load single image
+                with Image(filename=path) as frame:
+                    img.sequence.append(frame)
+            elif os.path.isdir(path):
+                # Load images from the input folder
+                for filename in sorted(os.listdir(path)):
+                    if filename.endswith(".png") or filename.endswith(".jpg"):
+                        filepath = os.path.join(path, filename)
+                        with Image(filename=path) as frame:
+                            img.sequence.append(frame)
+            else:
+                print(f"{path} does not exist or is neither a file nor a directory.")
+
+
+        # Convert fps to duration per frames
+        for frame in img.sequence:
+            frame.delay = int(100 / fps)  # Set the duration (adjust as needed)
+            
+        # Save the images as a GIF
+        img.save(filename=output_gif)

@@ -59,7 +59,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if sigma != None:
+    if np.logical_and(sigma != None, sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
@@ -77,7 +77,7 @@ def cimshow(im, **kwargs):
     cmin, cmax, vmin, vmax = np.nanpercentile(im, [.1, 99.9, .001, 99.999])
     # vmin, vmax = np.nanmin(im), np.nanmax(im)
     sl_contrast = FloatRangeSlider(
-        value=(cmin, cmax), min=vmin, max=vmax, step=(vmax - vmin) / 500,
+        value=(cmin, cmax), min=vmin, max=vmax, step=(vmax - vmin) / 5000,
         layout=ipywidgets.Layout(width='500px'),
     )
 
@@ -91,6 +91,39 @@ def cimshow(im, **kwargs):
         def set_image(nr):
             mm.set_data(im[nr])
     
+    
+    return fig, ax
+
+def cimshow_title(im, title=None, **kwargs):
+    """Simple 2d image plot with adjustable contrast.
+    
+    Returns matplotlib figure and axis created.
+    """
+        
+    im = np.array(im)
+    fig, ax = plt.subplots(figsize=(7,7))
+    im0 = im[0] if len(im.shape) == 3 else im
+    mm = ax.imshow(im0, **kwargs)
+
+    cmin, cmax, vmin, vmax = np.nanpercentile(im, [.1, 99.9, .001, 99.999])
+    # vmin, vmax = np.nanmin(im), np.nanmax(im)
+    sl_contrast = FloatRangeSlider(
+        value=(cmin, cmax), min=vmin, max=vmax, step=(vmax - vmin) / 5000,
+        layout=ipywidgets.Layout(width='500px'),
+    )
+
+    @ipywidgets.interact(contrast=sl_contrast)
+    def update(contrast):
+        mm.set_clim(contrast)
+    
+    if len(im.shape) == 3:
+        w_image = IntSlider(value=0, min=0, max=im.shape[0] - 1)
+        @ipywidgets.interact(nr=w_image)
+        def set_image(nr):
+            mm.set_data(im[nr])
+            if title is not None:
+                ax.title.set_text(str(title[nr]))
+
     
     return fig, ax
 
@@ -449,13 +482,14 @@ class InteractiveBeamstop:
 class draw_polygon_mask:
     """Interactive drawing of polygon masks"""
 
-    def __init__(self, image):
+    def __init__(self, image,**kwargs):
         self.image = image
         self.image_plot = image
         self.full_mask = np.zeros(image.shape)
         self.coordinates = []
         self.masks = []
         self._create_widgets()
+        self.kwargs = kwargs
         self.draw_gui()
 
     def _create_widgets(self):
@@ -479,9 +513,8 @@ class draw_polygon_mask:
 
         # Plotting
         fig, self.ax = plt.subplots(figsize= (8,8))
-        self.mm = self.ax.imshow(self.image_plot)
-        # self.overlay = self.ax.imshow(self.full_mask, alpha=0.2)
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.1, 99, 0.1, 99.9])
+        self.mm = self.ax.imshow(self.image_plot,**self.kwargs)
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.01, 99.99])
 
         sl_contrast = FloatRangeSlider(
             value=(cmin, cmax),
@@ -551,6 +584,28 @@ class draw_polygon_mask:
         self.combine_masks()
         self.image_plot = self.image * (1 - self.full_mask)
         self.mm.set_data(self.image_plot)
+        
+    def round_nested_list(self, nested_list, precision):
+        """
+        Round all values in a nested list to a specified precision.
+
+        Args:
+        nested_list (list): The nested list containing numerical values and/or tuples.
+        precision (int): Number of decimal places to round to (default is 2).
+
+        Returns:
+        list: A new nested list with all values rounded to the specified precision.
+        """
+        
+        if isinstance(nested_list, list):
+            return [self.round_nested_list(item, precision) for item in nested_list]
+        elif isinstance(nested_list, tuple):
+            return tuple(round(value, precision) for value in nested_list)
+        else:
+            return round(nested_list, precision)
+        
+    def get_vertice_coordinates(self):
+        return self.round_nested_list(self.coordinates,1)
         
         
 class InteractiveAutoBeamstop:
