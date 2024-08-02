@@ -152,6 +152,8 @@ def list_acquisition_filenames(run_nr,BASEFOLDER, acq_nrs=[], ONLY_CAMERA=False)
         run_nr = "*%04d*" % int(run_nr)
     elif type(run_nr) == float:
         run_nr = "*%04d*" % int(run_nr)
+    elif isinstance(run_nr, np.generic):
+        run_nr = "*%04d*" % int(run_nr)
 
     # If list is empty all files are loaded, only specific acquisition nrs
     # otherwise
@@ -307,17 +309,24 @@ def load_specific_frames(fnames, indexes, crop=None):
 
 
 # Full image loading procedure
-def load_processing(im_id, binning=1, crop=0):
+def load_processing(im_id, BASEFOLDER, binning=1, crop=0, nr_jobs = 1):
     """
     Loads all images, averaging over all images,
     padding to square shape, binning, Additional cropping (optional) etc.
 
     Parameter
     =========
-    im_id : int
-        image data identifier number
+    im_id : int or list of int
+        image data identifier number, if list images of multiple scans are 
+        going to be averaged
+    BASEFOLDER : int
+        general beamtime folder
+    binning : int
+        additional binning of pixels in image
     crop : int
         crops image arrays according to array[:crop, :crop]
+    n_jobs : int
+        number of jobs, i.e., available cpu threads
 
     Output
     ======
@@ -394,9 +403,6 @@ def load_processing_frames(fnames, loadmode="avg", crop=0, frame_index_list=[],n
         images = load_images(fnames, loadmode, n_jobs=nr_jobs, crop=crop)
     else:
         images = load_specific_frames(fnames, frame_index_list, crop=crop)
-
-    # Bring to square shape
-    images = helper.make_square_shape(images)
 
     # Calculate mean
     if images.ndim > 2:
