@@ -542,6 +542,14 @@ def reconstruct(image):
     '''
     return np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(image)))
 
+def FFT(image):
+    '''
+    Reconstruct the image by fft
+    -------
+    author: ck 2024
+    '''
+    return np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(image)))
+
 
 def reconstructCDI(image):
     '''

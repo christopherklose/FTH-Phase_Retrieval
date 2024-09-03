@@ -18,6 +18,7 @@ import fth_reconstruction as fth
 from IPython.display import display
 from IPython.display import clear_output
 import ipywidgets as widgets
+from skimage.draw import disk
 import h5py
 import math
 import cupy as cp
@@ -1470,80 +1471,6 @@ def inv_gnomonic(CCD, center=None, experimental_setup = {'ccd_dist': 18e-2, 'ene
     #makes outside from nan to zero
     CCD_projected=np.nan_to_num(CCD_projected, nan=0, posinf=0, neginf=0)
     
-
-    return CCD_projected
-
-def inv_gnomonic2(CCD, center=None, alpha=0, experimental_setup = {'ccd_dist': 18e-2, 'energy': 779.5, 'px_size' : 20e-6}, method='cubic' , mask=None):
-
-    #convert angle to radiant
-    alpha=np.pi/180*(alpha)
-
-    z=experimental_setup['ccd_dist']
-    l=experimental_setup['lambda']
-
-    if type(center)==type(None):
-        center=np.array([CCD.shape[1]/2, CCD.shape[0]/2])
-
-
-
-    print("center=",center, "z=",z )
-    values=CCD.flatten()
-    
-    # get spatial frequencies q0 without ewald projection
-    q0=(np.array(np.unravel_index(np.arange(values.size), CCD.shape))).astype('float64')
-    q0[0,:]-=center[0]
-    q0[1,:]-=center[1]
-    q0 *= experimental_setup['px_size']
-    q0=q0.T
-    
-
-    # get spatial frequencies q1=(u,v) with ewald projection
-    q1=q0.copy()
-    q1[:,0]=  1/l*np.sin( np.arctan( q0[:,0] / np.sqrt( q0[:,1] **2 + z**2 ) ) )
-    q1[:,1]=  1/l*np.sin( np.arctan( q0[:,1] / np.sqrt( q0[:,0] **2 + z**2 ) ) )
-    u=q1[:,1].copy()
-    v=q1[:,0].copy()
-
-
-    #do tilted transformation
-    q2=q0.copy()
-    Kx=(l*u+np.sin(alpha))/(l*np.cos(alpha))
-    Ky=np.sin(alpha)*(u+np.sin(alpha)/l) + np.sqrt(np.sin(alpha)**2*(u+np.sin(alpha)/l)**2 - (v*np.cos(alpha))**2  + np.cos(2*alpha)/l**2 +u**2 -2*np.sin(alpha)*u/l)
-    Ky=1/Ky
-
-    x=z*Kx*Ky-z*np.tan(alpha)
-    y=v*z*Ky
-
-    #TILTED ANGLES
-    q2[:,0]=1/l*x.copy()
-    q2[:,1]=1/l*y.copy()
-    q2=np.nan_to_num(q2, nan=100)
-    
-    
-    #adjust so that center is at center of image
-    q0*=1/l
-    q0[:,0]-=((q0[-1,0]+q0[0,0])/2)
-    q0[:,1]-=((q0[-1,1]+q0[0,1])/2)
-
-    #do interpolation
-    CCD_projected = griddata(q2, values, q0, method=method)
-    CCD_projected = np.reshape(CCD_projected, CCD.shape).T
-    #makes outside from nan to zero
-    CCD_projected=np.nan_to_num(CCD_projected, nan=0, posinf=0, neginf=0)
-    
-    if True:
-        fig, ax = plt.subplots(1,3,figsize=(12,4))
-        skip=10
-        ax[0].scatter(q0[:,0][::skip],q0[:,1][::skip], c=values[::skip], vmax=2000, s=4*skip/10, marker="s")
-        ax[1].scatter(q2[:,0][::skip],q2[:,1][::skip], c=values[::skip], vmax=2000, s=8, marker="s")
-        #ax.set_xlim(-5.5e6,5.5e6)
-        #ax.set_ylim(-5.5e6,5.5e6)
-
-        ax[2].scatter(q0[:,0][values==1000],q0[:,1][values==1000])
-        ax[2].scatter(q2[:,0][values==1000],q2[:,1][values==1000])
-
-        for i in [0,1,2]:
-            ax[i].grid()
 
     return CCD_projected
 

@@ -77,13 +77,52 @@ def photon_energy_wavelength(value, input_unit = 'eV'):
         energy_Xray = scipy.constants.h*scipy.constants.c/(value*10**(-9)*scipy.constants.e)
         return energy_Xray
 
-# ======================
-# Other
-# ======================
+#======================
+#Other
+#======================
+#Draw circle mask
+def circle_mask(shape,center,radius,sigma=None):
+
+    '''
+    Draws circle mask with option to apply gaussian filter for smoothing
+    
+    Parameter
+    =========
+    shape : int tuple
+        shape/dimension of output array
+    center : int tuple
+        center coordinates (ycenter,xcenter)
+    radius : scalar
+        radius of mask in px. Care: diameter is always (2*radius+1) px
+    sigma : scalar
+        std of gaussian filter
+        
+    Output
+    ======
+    mask: array
+        binary mask, or smoothed binary mask        
+    ======
+    author: ck 2022
+    '''
+    
+    #setup array
+    x = np.linspace(0,shape[1]-1,shape[1])
+    y = np.linspace(0,shape[0]-1,shape[0])
+    X,Y = np.meshgrid(x,y)
+
+    # define circle
+    mask = np.sqrt(((X-center[1])**2+(Y-center[0])**2)) <= (radius)
+    mask = mask.astype(float)
+
+    # smooth aperture
+    if sigma != None:
+        mask = gaussian_filter(mask,sigma)
+           
+    return mask
 
 
-# #This function is much slower
-# def shift_image(image, shift):
+##This function is much slower
+#def shift_image(image, shift):
 #    """
 #    Shifts image with sub-pixel precission in Fourier space
 #
