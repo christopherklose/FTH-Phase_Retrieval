@@ -58,7 +58,7 @@ def circle_mask(shape,center,radius,sigma=None):
     mask = mask.astype(float)
 
     # smooth aperture
-    if sigma != None:
+    if np.logical_and(sigma != None,sigma != 0):
         mask = gaussian_filter(mask,sigma)
            
     return mask
@@ -97,7 +97,7 @@ def cimshow(im, **kwargs):
     
     Returns matplotlib figure and axis created.
     """
-    im = np.array(im)
+    im = np.array(im).astype("float")
     fig, ax = plt.subplots(figsize=(7,7))
     im0 = im[0] if len(im.shape) == 3 else im
     mm = ax.imshow(im0, **kwargs)
@@ -147,11 +147,12 @@ class InteractiveCenter:
             self.circles.append(circle)
             self.ax.add_artist(circle)
 
-        w_c0 = ipywidgets.IntText(value=c0,step = 0.5, description="c0 (vert)")
-        w_c1 = ipywidgets.IntText(value=c1,step = 0.5, description="c1 (hor)")
-        w_rBS = ipywidgets.IntText(value=rBS, description="rBS")
+        self.widgets = { "w_c0" :ipywidgets.IntText(value=c0,step = 0.5, description="c0 (vert)"),
+        "w_c1" : ipywidgets.IntText(value=c1,step = 0.5, description="c1 (hor)"),
+        "w_rBS" : ipywidgets.IntText(value=rBS, description="rBS")}
         
-        ipywidgets.interact(self.update, c0=w_c0, c1=w_c1, r=w_rBS)
+        ipywidgets.interact(self.update, c0=self.widgets["w_c0"], c1=self.widgets["w_c1"], r=self.widgets["w_rBS"])
+        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
     
     def update(self, c0, c1, r):
         self.c0 = c0
@@ -160,6 +161,15 @@ class InteractiveCenter:
         for i, c in enumerate(self.circles):
             c.set_center([c1, c0])
             c.set_radius(r * (i + 1))
+            
+    def onclick_handler(self, event):
+        """Set the center of the active circle to clicked position."""
+        if event.button == 3:  # MouseButton.RIGHT:
+            c1, c0 = (event.xdata, event.ydata)
+            self.widgets["w_c0"].value = int(c0)
+            self.widgets["w_c1"].value = int(c1)
+            self.update(int(c0),int(c1),self.rBS)
+
 
 def axis_to_roi(axis, labels=None):
     """
@@ -305,9 +315,9 @@ def intensity_scale(im1, im2, mask=None):
         for p, v in zip(patches, hist):
             p.set_height(v)
     return fig, ax
+
     
-    
-    
+
 class AzimuthalIntegrationCenter:
     """Plot image with controls for contrast and center alignment tools."""
 
@@ -422,8 +432,8 @@ class AzimuthalIntegrationCenter:
         mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
         self.timshow.set_data(self.I_t)
         self.timshow.set_clim([mi, ma])
-        
-        
+
+
 class InteractiveBeamstop:
     """Plot image with controls for contrast and draw a beamstop. Use to find best radi and smoothing values."""
     def __init__(self, im, c0=None, c1=None, rBS=60,stdBS=4, **kwargs):        
@@ -459,14 +469,17 @@ class InteractiveBeamstop:
         #Change beamstop parameter
         w_rBS = ipywidgets.IntText(value=self.rBS, description="radius")
         w_std = ipywidgets.IntText(value=self.stdBS, description="smoothing")
-        ipywidgets.interact(self.update_bs, r=w_rBS,std = w_std)
+        w_c0 = ipywidgets.IntText(value=self.center[0], description="c0 (vert)")
+        w_c1 = ipywidgets.IntText(value=self.center[1], description="c1 (horz)")
+        ipywidgets.interact(self.update_bs, r=w_rBS,std = w_std, c0 = w_c0, c1 = w_c1)
     
     #Update plot
     def update_plt(self,contrast):
         self.mm.set_clim(contrast)
     
     #Update bs
-    def update_bs(self, r,std):
+    def update_bs(self, r,std, c0, c1):
+        self.center = [c0,c1]
         self.rBS = r
         self.stdBS = std
         self.mask_bs = 1 - circle_mask(
@@ -474,8 +487,8 @@ class InteractiveBeamstop:
         )
         self.image = self.im*self.mask_bs
         self.mm.set_data(self.image)
-        
-        
+
+
 class draw_polygon_mask:
     """Interactive drawing of polygon masks"""
 
@@ -582,27 +595,6 @@ class draw_polygon_mask:
         self.image_plot = self.image * (1 - self.full_mask)
         self.mm.set_data(self.image_plot)
         
-    def round_nested_list(self, nested_list, precision):
-        """
-        Round all values in a nested list to a specified precision.
-
-        Args:
-        nested_list (list): The nested list containing numerical values and/or tuples.
-        precision (int): Number of decimal places to round to (default is 2).
-
-        Returns:
-        list: A new nested list with all values rounded to the specified precision.
-        """
-        
-        if isinstance(nested_list, list):
-            return [self.round_nested_list(item, precision) for item in nested_list]
-        elif isinstance(nested_list, tuple):
-            return tuple(round(value, precision) for value in nested_list)
-        else:
-            return round(nested_list, precision)
-        
-    def get_vertice_coordinates(self):
-        return self.round_nested_list(self.coordinates,1)
         
 class InteractiveAutoBeamstop:
     """Plot image with controls for contrast and beamstop alignment tools."""
@@ -698,10 +690,10 @@ class InteractiveAutoBeamstop:
 
         # Filter remainings of ref modulations
         hologram_mask = skimage.morphology.remove_small_objects(
-            hologram_mask, min_size=2000
+            hologram_mask, min_size=500
         )
         hologram_mask = 1 - skimage.morphology.remove_small_objects(
-            (1 - hologram_mask).astype(bool), min_size=2000
+            (1 - hologram_mask).astype(bool), min_size=500
         )
 
         # Expand Mask
@@ -737,10 +729,10 @@ class InteractiveAutoBeamstop:
         # Draw beamstop only up to given radius
         hologram_mask = hologram_mask * circle_mask(
             hologram_mask.shape,
-            [hologram_mask.shape[0] / 2, hologram_mask.shape[1] / 2 - 3],
+            np.array(hologram_mask.shape)/2,
             radius,
-            sigma=None,
-        )
+            sigma = None,
+       )
 
         return hologram_mask
 
@@ -787,9 +779,9 @@ class InteractiveAutoBeamstop:
     def update_mask(self):
         self.m1.set_data(self.image * self.mask_bs)
         self.m2.set_data(self.image * (1 - self.mask_bs))
-        
+
             
-            
+
 class InteractiveCircleCoordinates:
     """
     Creates overlay with circles on an image. Slider allow changing
@@ -881,7 +873,7 @@ class InteractiveCircleCoordinates:
         self.masks[index].set_center([c0, c1])
         
         print("Aperture Coordinates:")
-        print(self.get_mask())
+        print(self.get_params())
 
     def onclick_handler(self, event):
         """Set the center of the active circle to clicked position."""
@@ -892,10 +884,10 @@ class InteractiveCircleCoordinates:
             self.widgets["c0"].value = c0
             self.widgets["c1"].value = c1
 
-    def get_mask(self):
+    def get_params(self):
         """Return list of tuples with mask parameters (center, radius)"""
         return [(np.round(c.center[1],1),np.round(c.center[0],1), np.round(c.radius,1)) for c in self.masks]
-    
+
 
 class InteractiveEllipseCoordinates:
     def __init__(self, image, num_masks,coordinates=None):
@@ -948,19 +940,19 @@ class InteractiveEllipseCoordinates:
             ),
             "mask_index": widgets.IntSlider(min=0, max=self.num_masks - 1, value=0),
             "height": widgets.FloatSlider(
-                min=0, max=400, value=10, step=0.5, description="height",layout=ipywidgets.Layout(width="350px"),
+                min=0, max=600, value=10, step=0.5, description="height",layout=ipywidgets.Layout(width="350px"),
             ),
             "width": widgets.FloatSlider(
-                min=0, max=400, value=10, step=0.5, description="width",layout=ipywidgets.Layout(width="350px"),
+                min=0, max=600, value=10, step=0.5, description="width",layout=ipywidgets.Layout(width="350px"),
             ),
             "angle": widgets.FloatSlider(
                 min=0, max=180, value=0, step=0.5, description="angle",layout=ipywidgets.Layout(width="400px"),
             ),
             "c0": widgets.FloatSlider(
-                min=0, max=2048, value=1024, step=0.5, description="x",layout=ipywidgets.Layout(width="400px"),
+                min=0, max=2500, value=1024, step=0.5, description="x",layout=ipywidgets.Layout(width="400px"),
             ),
             "c1": widgets.FloatSlider(
-                min=0, max=2048, value=1024, step=0.5, description="y",layout=ipywidgets.Layout(width="400px"),
+                min=0, max=2500, value=1024, step=0.5, description="y",layout=ipywidgets.Layout(width="400px"),
             ),
         }
 
@@ -1027,276 +1019,3 @@ class InteractiveEllipseCoordinates:
     def get_params(self):
         """Return list of tuples with mask parameters (center, height, width, angle)"""
         return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
-    
-    
-class Shift_Scale_Mask:
-    """Plot image with controls for contrast, x/y shift and scaling."""
-    
-    def __init__(self, image, mask):
-        self.image = image
-        self.shape = self.image.shape
-        self.mask_original = mask
-        self.mask = mask
-        self.mask_shifted = mask
-        self.draw_gui()
-        self.shift = [0,0]
-        self.scale = 0
-        
-    def draw_gui(self):
-        """Create plot and control widgets."""
-
-        self.fig, self.ax = plt.subplots(1,2,figsize=(10,5),sharex=True,sharey=True)
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
-        self.m0 = self.ax[0].imshow(self.image,vmin=vmin,vmax=vmax)
-        self.m1 = self.ax[1].imshow(self.image,vmin=vmin,vmax=vmax)
-        self.ax[0].set_title("Image*Mask")
-        self.ax[1].set_title("Image*(1-Mask)")
-            
-        self.widgets = {
-            "contrast": widgets.FloatRangeSlider(
-            value=(vmin, vmax),
-            min=cmin,
-            max=cmax,
-            step=(vmax - vmin) / 500,
-            layout=ipywidgets.Layout(width="500px"),
-            ),
-            "shift_ver": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
-            "shift_hor": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
-            "scale": widgets.IntSlider(min=-20, max=20, value=0,description="scale"),
-                    }
-
-        ipywidgets.interact(self.update_plt_contrast, contrast=self.widgets["contrast"])
-        widgets.interact(
-            self.update_mask,
-            shift_ver=self.widgets["shift_ver"],
-            shift_hor=self.widgets["shift_hor"],
-            scale=self.widgets["scale"],
-        )
-        
-        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
-            
-    def update_plt_contrast(self, contrast):
-        self.m0.set_clim(contrast)
-        self.m1.set_clim(contrast)
-    
-    def update_plt_images(self):
-        self.m0.set_data(self.image*self.mask)
-        self.m1.set_data(self.image*(1-self.mask))
-    
-    def shift_mask(self, shift_ver,shift_hor):
-            self.shift = [shift_ver,shift_hor]
-            self.mask = np.round(shift_image(self.mask_original,self.shift))
-        
-    def scale_mask(self,scale):
-        self.scale = scale
-        if scale > 0:
-            footprint = skimage.morphology.disk(scale)
-            self.mask = skimage.morphology.dilation(self.mask, footprint)
-        elif scale < 0:
-            footprint = skimage.morphology.disk(np.abs(scale))
-            self.mask = skimage.morphology.erosion(self.mask, footprint)
-            
-    def update_mask(self,shift_ver,shift_hor,scale):
-        self.shift_mask(shift_ver,shift_hor)
-        if scale !=0:
-            self.scale_mask(scale)
-            
-        self.update_plt_images()
-            
-    def onclick_handler(self, event):
-        """Set the center of the active circle to clicked position."""
-        if event.button == 3:  # MouseButton.RIGHT:
-            c0, c1 = (event.xdata, event.ydata)
-            shift = [self.mask.shape[0]/2-c0,self.mask.shape[0]/2-c1]
-            self.update_mask(shift[0],shift[1],self.scale)
-        
-    def get_mask(self):
-        """Return list of tuples with mask parameters (center, radius)"""
-        return self.mask, self.shift, self.scale
-    
-    
-class Shift_Scale_Mask:
-    """Plot image with controls for contrast, x/y shift and scaling."""
-    
-    def __init__(self, image, mask, **kwargs):
-        self.image = image
-        self.shape = self.image.shape
-        self.mask_original = mask
-        self.mask = mask
-        self.mask_shifted = mask
-        self.kwargs = kwargs
-        self.draw_gui()
-        self.shift = [0,0]
-        self.scale = 0
-
-        
-    def draw_gui(self):
-        """Create plot and control widgets."""
-
-        self.fig, self.ax = plt.subplots(1,2,figsize=(10,5),sharex=True,sharey=True)
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
-        self.m0 = self.ax[0].imshow(self.image,**self.kwargs)
-        self.m1 = self.ax[1].imshow(self.image,**self.kwargs)
-        self.ax[0].set_title("Image*Mask")
-        self.ax[1].set_title("Image*(1-Mask)")
-            
-        self.widgets = {
-            "contrast": widgets.FloatRangeSlider(
-            value=(vmin, vmax),
-            min=cmin,
-            max=cmax,
-            step=(vmax - vmin) / 500,
-            layout=ipywidgets.Layout(width="500px"),
-            ),
-            "shift_ver": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
-            "shift_hor": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=0, step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
-            "scale": widgets.IntSlider(min=-20, max=20, value=0,description="scale"),
-                    }
-
-        ipywidgets.interact(self.update_plt_contrast, contrast=self.widgets["contrast"])
-        widgets.interact(
-            self.update_mask,
-            shift_ver=self.widgets["shift_ver"],
-            shift_hor=self.widgets["shift_hor"],
-            scale=self.widgets["scale"],
-        )
-        
-        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
-            
-    def update_plt_contrast(self, contrast):
-        self.m0.set_clim(contrast)
-        self.m1.set_clim(contrast)
-    
-    def update_plt_images(self):
-        self.m0.set_data(self.image*self.mask)
-        self.m1.set_data(self.image*(1-self.mask))
-    
-    def shift_mask(self, shift_ver,shift_hor):
-            self.shift = [shift_ver,shift_hor]
-            self.mask = np.round(shift_image(self.mask_original,self.shift))
-        
-    def scale_mask(self,scale):
-        self.scale = scale
-        if scale > 0:
-            footprint = skimage.morphology.disk(scale)
-            self.mask = skimage.morphology.dilation(self.mask, footprint)
-        elif scale < 0:
-            footprint = skimage.morphology.disk(np.abs(scale))
-            self.mask = skimage.morphology.erosion(self.mask, footprint)
-            
-    def update_mask(self,shift_ver,shift_hor,scale):
-        self.shift_mask(shift_ver,shift_hor)
-        if scale !=0:
-            self.scale_mask(scale)
-            
-        self.update_plt_images()
-            
-    def onclick_handler(self, event):
-        """Set the center of the active circle to clicked position."""
-        if event.button == 3:  # MouseButton.RIGHT:
-            c0, c1 = (event.xdata, event.ydata)
-            shift = [self.mask.shape[0]/2-c0,self.mask.shape[0]/2-c1]
-            self.update_mask(shift[0],shift[1],self.scale)
-        
-    def get_mask(self):
-        """Return list of tuples with mask parameters (center, radius)"""
-        return self.mask, self.shift, self.scale
-
-    
-class Shift_Rotate:
-    """Plot image with controls for contrast, x/y shift and scaling."""
-    
-    def __init__(self, image, shift = [0,0], angle = 0, ticks = None):
-        self.image = image
-        self.shape = self.image.shape
-        self.image_original = image
-        self.shift = shift
-        self.angle = angle
-        self.ticks = ticks
-        
-        self.draw_gui()        
-        
-    def draw_gui(self):
-        """Create plot and control widgets."""
-
-        self.fig, self.ax = plt.subplots(figsize=(8,8))
-        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.01, 99.99])
-        self.m0 = self.ax.imshow(self.image,vmin=vmin,vmax=vmax)
-        self.ax.set_title("Image")
-            
-        if self.ticks is not None:
-            plt.xticks(fontsize=7)
-            plt.yticks(fontsize=7)
-            self.ax.set_xticks(self.ticks[1])
-            self.ax.set_yticks(self.ticks[0])
-            plt.grid()
-            
-            
-        self.widgets = {
-            "contrast": widgets.FloatRangeSlider(
-            value=(vmin, vmax),
-            min=cmin,
-            max=cmax,
-            step=(vmax - vmin) / 500,
-            layout=ipywidgets.Layout(width="500px"),
-            ),
-            "shift_ver": widgets.FloatSlider(
-                min=-self.shape[1]/2, max=self.shape[1]/2, value=self.shift[0], step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
-            "shift_hor": widgets.FloatSlider(
-                min=-self.shape[1]/2, max=self.shape[1]/2, value=self.shift[1], step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
-            "angle": widgets.FloatSlider(min=-180, max=180, value=self.angle,step=0.25,description="angle"),
-                    }
-
-        ipywidgets.interact(self.update_plt_contrast, contrast=self.widgets["contrast"])
-        widgets.interact(
-            self.update_image,
-            shift_ver=self.widgets["shift_ver"],
-            shift_hor=self.widgets["shift_hor"],
-            angle=self.widgets["angle"],
-        )
-        
-        self.fig.canvas.mpl_connect("button_press_event", self.onclick_handler)
-            
-    def update_plt_contrast(self, contrast):
-        self.m0.set_clim(contrast)
-    
-    def update_plt_images(self):
-        self.m0.set_data(self.image)
-        
-    def update_image(self,shift_ver,shift_hor,angle):
-        self.rotate_image(angle)
-        self.shift_image(shift_ver,shift_hor)
-            
-        self.update_plt_images()
-    
-    def update_controls(self,shift):
-        self.widgets["shift_ver"].value = shift[0]
-        self.widgets["shift_hor"].value = shift[1]
-    
-    def shift_image(self, shift_ver,shift_hor):
-            self.shift = [shift_ver,shift_hor]
-            self.image = np.round(shift_image(self.image,self.shift))
-        
-    def rotate_image(self,angle):
-        self.angle = angle
-        
-        if self.angle != 0:
-            self.image = rotate(self.image_original,self.angle,reshape=False)
-        elif self.angle == 0:
-            self.image = self.image_original.copy()
-            
-    def onclick_handler(self, event):
-        """Set the center of the active circle to clicked position."""
-        if event.button == 3:  # MouseButton.RIGHT:
-            c0, c1 = (event.xdata, event.ydata)
-            shift = [-1*(self.shape[0]/2-c1),-1*(self.shape[1]/2-c0)]
-            self.update_controls(shift)
-            self.update_image(shift[0],shift[1],self.angle)
-        
-    def get_parameter(self):
-        """Return list of tuples with mask parameters (center, radius)"""
-        return self.image, self.shift, self.angle

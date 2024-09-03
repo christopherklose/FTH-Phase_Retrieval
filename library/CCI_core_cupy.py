@@ -1,7 +1,7 @@
 """
 Python Dictionary for CCI correlation analysis
 
-2022/23
+2022-24
 @authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
 """
 
@@ -38,7 +38,6 @@ from sklearn.metrics import pairwise_distances
 
 #colormap
 from matplotlib.colors import LinearSegmentedColormap
-import cmap as cmap
 
 #cupy
 import cupy as cp
@@ -122,6 +121,88 @@ def circle_mask(shape,center,radius,sigma=None):
     return mask
 
 
+##This function is much slower
+#def shift_image(image, shift):
+#    """
+#    Shifts image with sub-pixel precission in Fourier space
+#
+#
+#    Parameters
+#    ----------
+#    image: array
+#        Moving image (2d or 3d stack), will be shifted by shift vector
+#
+#    shift: vector
+#        x and y translation in px
+#
+#    Returns
+#    -------
+#    image_shifted: array
+#        Shifted image
+#    -------
+#    author: CK 2023
+#    """
+#
+#    # 2d Version
+#    if image.ndim == 2:
+#        # Get cupy array
+#        image = cp.array(image)
+#
+#        # Compute the Fourier Transform of the image
+#        fourier_image = cp.fft.fft2(image)
+#
+#        # Create a meshgrid of frequencies
+#        freq_y = cp.fft.fftfreq(image.shape[0])
+#        freq_x = cp.fft.fftfreq(image.shape[1])
+#        meshgrid_freq = cp.meshgrid(freq_y, freq_x)
+#
+#        # Compute the complex exponential for the shift
+#        shift_exponential = cp.exp(
+#            -2j * cp.pi * (shift[1] * meshgrid_freq[0] + shift[0] * meshgrid_freq[1])
+#        )
+#
+#        # Apply the shift to the Fourier Transform
+#        shifted_fourier_image = fourier_image * shift_exponential
+#
+#        # Compute the inverse Fourier Transform to obtain the shifted image
+#        shifted_image_array = cp.asnumpy(np.abs(cp.fft.ifft2(shifted_fourier_image)))
+#
+#    # 3d Version
+#    if image.ndim == 3:
+#        # Get cupy array
+#        image = cp.array(image)
+#
+#        # Shift
+#        shift = cp.array(shift)
+#        shift_y = shift[:, 0]
+#        shift_x = shift[:, 1]
+#
+#        # Compute the Fourier Transform of the image
+#        fourier_image = cp.fft.fft2(image)
+#
+#        # Create a meshgrid of frequencies
+#        freq_y = cp.fft.fftfreq(image.shape[1])
+#        freq_x = cp.fft.fftfreq(image.shape[2])
+#
+#        meshgrid_freq_x, meshgrid_freq_y = cp.meshgrid(freq_y, freq_x)
+#        meshgrid_freq_y = cp.repeat(meshgrid_freq_y[cp.newaxis, :, :], shift.shape[0], axis=0)
+#        meshgrid_freq_x = cp.repeat(meshgrid_freq_x[cp.newaxis, :, :], shift.shape[0], axis=0)
+#
+#        y = meshgrid_freq_y * shift_y[:, None, None]
+#        x = meshgrid_freq_x * shift_x[:, None, None]
+#
+#        # Compute the complex exponential for the shift
+#        shift_exponential = cp.exp(-2j * cp.pi * (y + x))
+#
+#        # Apply the shift to the Fourier Transform
+#        shifted_fourier_image = fourier_image * shift_exponential
+#
+#        # Compute the inverse Fourier Transform to obtain the shifted image
+#        shifted_image_array = cp.asnumpy(cp.abs(cp.fft.ifft2(shifted_fourier_image)))
+#
+#    return shifted_image_array
+
+
 def shift_image(image,shift,interpolation = True,out_dtype = 'numpy'):
     '''
     Shifts image with sub-pixel precission in Fourier space
@@ -164,7 +245,7 @@ def shift_image(image,shift,interpolation = True,out_dtype = 'numpy'):
 
 
 
-def shift_image_stack(image_stack,shift,chunk_sz = 'none'):
+def shift_image_stack(image_stack,shift,interpolation = True, chunk_sz = None):
     '''
     Shifts all images of a stack with sub-pixel precission in Fourier space
     
@@ -187,41 +268,44 @@ def shift_image_stack(image_stack,shift,chunk_sz = 'none'):
     -------
     author: CK 2023
     '''
+
+    # Execute only if shifts are non-zero
+    if np.any(shift == np.zeros(shift.shape)) == False:
+        if image_stack.ndim == 2:
+            print('Warning: This is only a single 2d image!')
+            image_stack = shift_image(image_stack, shift)
+        elif image_stack.ndim == 3:
+            if chunk_sz is None:        
+                #Shift Image
+                for frame in tqdm(range(image_stack.shape[0])):
+                    image_stack[frame] = shift_image(image_stack[frame], shift[frame])
+            else:       
+                # Limits for Chunk Image stacks
+                chunk_it = np.append(
+                    np.arange(0, np.ceil(image_stack.shape[0] / chunk_sz) * chunk_sz, chunk_sz), image_stack.shape[0]).astype(int)
     
-    if image_stack.ndim == 2:
-        print('Warning: This is only a single 2d image!')
-        image_stack = shift_image(image_stack, shift)
-    elif image_stack.ndim == 3:
-        if chunk_sz == 'none':        
-            #Shift Image
-            for frame in tqdm(range(image_stack.shape[0])):
-                image_stack[frame] = shift_image(image_stack[frame], shift[frame])
-        else:       
-            # Limits for Chunk Image stacks
-            chunk_it = np.append(
-                np.arange(0, np.ceil(image_stack.shape[0] / chunk_sz) * chunk_sz, chunk_sz), image_stack.shape[0]).astype(int)
+                #Vary chunk
+                print("Shifting images...")
+                for ii in tqdm(range(len(chunk_it) - 1),desc="Chunk"):
+                    # Chunk data and load into gpu
+                    tmp_stack = image_stack[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    tmp_stack = cp.array(tmp_stack)
+                    shift_stack = shift[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    shift_stack = cp.array(shift_stack)
+    
+                    ##Vary frames
+                    for frames in tqdm(range(tmp_stack.shape[0]),desc="Frame"):
+                        #Calc correction             
+                        tmp_stack[frames] = shift_image(tmp_stack[frames],shift_stack[frames,:], interpolation = interpolation, out_dtype = 'cupy')
+                        
+                    # Assign to images
+                    image_stack[chunk_it[ii]:chunk_it[ii+1]] = cp.asnumpy(tmp_stack)
 
-            #Vary chunk
-            print("Shifting images...")
-            for ii in tqdm(range(len(chunk_it) - 1)):
-                # Chunk data and load into gpu
-                tmp_stack = image_stack[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                tmp_stack = cp.array(tmp_stack)
-                shift_stack = shift[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                shift_stack = cp.array(shift_stack)
-                
-                ##Shift images
-                #tmp_stack = shift_image(tmp_stack, shift_stack)
-
-                ##Vary frames
-                for frames in tqdm(range(tmp_stack.shape[0])):
-                    #Calc correction             
-                    tmp_stack[frames] = shift_image(tmp_stack[frames],shift_stack[frames,:],out_dtype = '')
-                    
-                # Assign to images
-                image_stack[chunk_it[ii]:chunk_it[ii+1]] = cp.asnumpy(tmp_stack)
+    elif np.any(shift == np.zeros(shift.shape)) == True:
+        print("Shift is all-zero. Images are not going to be shifted!")
     
     return image_stack
+    
 
 def image_registration(image_unproccessed,image_background, method= "phase_cross_correlation",static_mask = None, moving_mask = None, roi=None,im_out=False):
     '''
@@ -310,12 +394,12 @@ def image_registration(image_unproccessed,image_background, method= "phase_cross
         return image_corrected, shift
     else:
         return shift
-    
+
 
 #Fit (lin)
 def func(x, a, b):
     return a*x+b
-    
+
 def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False, print_out = False):
     '''
     Calculates intensity normalization factor between images
@@ -397,7 +481,7 @@ def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False,
     return factor, offset
 
 
-def calc_diff_stack(images, topos, chunk_sz="none", method="scalarproduct", crop = 0):
+def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop = 0):
     """
     Calculates scaled differences between images and topos
 
@@ -444,72 +528,142 @@ def calc_diff_stack(images, topos, chunk_sz="none", method="scalarproduct", crop
         factor = np.zeros(images.shape[0])
         offset = np.zeros(images.shape[0])
 
-        if chunk_sz == "none":
-            # Shift Image
-            images = cp.array(images)
-            topos = cp.array(topos)
-                
-            for frames in tqdm(range(images.shape[0])):                
-                factor[frames], offset[frames] = dyn_factor(
-                    images[frames],
-                    topos[frames],
-                    method=method,
-                    crop=crop,
-                    print_out=False,
-                    plot=False,
-                )
-                images[frames] = (
-                    images[frames] / factor[frames] - topos[frames] - offset[frames]
-                )
-                
-            #Back to numpy
-            images = cp.asnumpy(images)
-            factor = factor
-            offset = offset
-            
-        else:
-            # Limits for Chunk Image stacks
-            chunk_it = np.append(
-                np.arange(0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz),
-                images.shape[0],
-            ).astype(int)
-
-            # Vary chunk
-            # print("Shifting images...")
-            for ii in tqdm(range(len(chunk_it) - 1)):
-                # Chunk data and load into gpu
-                image_stack = images[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                factor_stack = factor[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                offset_stack = offset[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                topo_stack = topos[chunk_it[ii] : chunk_it[ii + 1]].copy()
-
-                # To cupy
-                image_stack = cp.array(image_stack)
-                topo_stack = cp.array(topo_stack)
-                factor_stack = factor_stack
-                offset_stack = offset_stack
-
-                # Vary frames
-                for frames in tqdm(range(image_stack.shape[0])):
-                    # Calc difference holo
-                    factor_stack[frames], offset_stack[frames] = dyn_factor(
-                        image_stack[frames],
-                        topo_stack[frames],
+        if topos.ndim == 3:
+            if chunk_sz == None:
+                # Shift Image
+                images = cp.array(images)
+                topos = cp.array(topos)
+                    
+                for frames in tqdm(range(images.shape[0])):                
+                    factor[frames], offset[frames] = dyn_factor(
+                        images[frames],
+                        topos[frames],
                         method=method,
-                        crop = crop,
+                        crop=crop,
                         print_out=False,
                         plot=False,
                     )
-                    image_stack[frames] = (
-                        image_stack[frames] / factor_stack[frames]
-                        - topo_stack[frames]
-                        - offset_stack[frames]
+                    images[frames] = (
+                        images[frames] / factor[frames] - topos[frames] - offset[frames]
                     )
+                    
+                #Back to numpy
+                images = cp.asnumpy(images)
+                factor = factor
+                offset = offset
+                
+            else:
+                # Limits for Chunk Image stacks
+                chunk_it = np.append(
+                    np.arange(0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz),
+                    images.shape[0],
+                ).astype(int)
+    
+                # Vary chunk
+                # print("Shifting images...")
+                for ii in tqdm(range(len(chunk_it) - 1)):
+                    # Chunk data and load into gpu
+                    image_stack = images[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    factor_stack = factor[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    offset_stack = offset[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    topo_stack = topos[chunk_it[ii] : chunk_it[ii + 1]].copy()
+    
+                    # To cupy
+                    image_stack = cp.array(image_stack)
+                    topo_stack = cp.array(topo_stack)
+                    factor_stack = factor_stack
+                    offset_stack = offset_stack
+    
+                    # Vary frames
+                    for frames in tqdm(range(image_stack.shape[0])):
+                        # Calc difference holo
+                        factor_stack[frames], offset_stack[frames] = dyn_factor(
+                            image_stack[frames],
+                            topo_stack[frames],
+                            method=method,
+                            crop = crop,
+                            print_out=False,
+                            plot=False,
+                        )
+                        image_stack[frames] = (
+                            image_stack[frames] / factor_stack[frames]
+                            - topo_stack[frames]
+                            - offset_stack[frames]
+                        )
+    
+                    # Assign to images
+                    factor[chunk_it[ii] : chunk_it[ii + 1]] = factor_stack
+                    images[chunk_it[ii] : chunk_it[ii + 1]] = cp.asnumpy(image_stack)
+                    offset[chunk_it[ii] : chunk_it[ii + 1]] = offset_stack
 
-                # Assign to images
-                factor[chunk_it[ii] : chunk_it[ii + 1]] = factor_stack
-                images[chunk_it[ii] : chunk_it[ii + 1]] = cp.asnumpy(image_stack)
-                offset[chunk_it[ii] : chunk_it[ii + 1]] = offset_stack
+        elif topos.ndim == 2:
+            if chunk_sz == None:
+                # Shift Image
+                images = cp.array(images)
+                topos = cp.array(topos)
+                    
+                for frames in tqdm(range(images.shape[0])):                
+                    factor[frames], offset[frames] = dyn_factor(
+                        images[frames],
+                        topos,
+                        method=method,
+                        crop=crop,
+                        print_out=False,
+                        plot=False,
+                    )
+                    images[frames] = (
+                        images[frames] / factor[frames] - topos - offset[frames]
+                    )
+                    
+                #Back to numpy
+                images = cp.asnumpy(images)
+                factor = factor
+                offset = offset
+                
+            else:
+                # Limits for Chunk Image stacks
+                chunk_it = np.append(
+                    np.arange(0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz),
+                    images.shape[0],
+                ).astype(int)
+    
+                # Vary chunk
+                # print("Shifting images...")
+                for ii in tqdm(range(len(chunk_it) - 1)):
+                    # Chunk data and load into gpu
+                    image_stack = images[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    factor_stack = factor[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    offset_stack = offset[chunk_it[ii] : chunk_it[ii + 1]].copy()
+                    topo_stack = topos.copy()
+    
+                    # To cupy
+                    image_stack = cp.array(image_stack)
+                    topo_stack = cp.array(topo_stack)
+                    factor_stack = factor_stack
+                    offset_stack = offset_stack
+    
+                    # Vary frames
+                    for frames in tqdm(range(image_stack.shape[0])):
+                        # Calc difference holo
+                        factor_stack[frames], offset_stack[frames] = dyn_factor(
+                            image_stack[frames],
+                            topo_stack,
+                            method=method,
+                            crop = crop,
+                            print_out=False,
+                            plot=False,
+                        )
+                        image_stack[frames] = (
+                            image_stack[frames] / factor_stack[frames]
+                            - topo_stack
+                            - offset_stack[frames]
+                        )
+    
+                    # Assign to images
+                    factor[chunk_it[ii] : chunk_it[ii + 1]] = factor_stack
+                    images[chunk_it[ii] : chunk_it[ii + 1]] = cp.asnumpy(image_stack)
+                    offset[chunk_it[ii] : chunk_it[ii + 1]] = offset_stack
+        
 
     return images, factor, offset
 
@@ -538,9 +692,9 @@ def FFT(image):
     return image
 
 
-#======================
-#CCI specific
-#======================
+# ======================
+# CCI specific
+# ======================
 
 def parula_cmap():
 
@@ -972,8 +1126,8 @@ def reconstruct_correlation_map(frames,corr_array):
 
 
 
-    
-def create_linkage(cluster_idx,corr_array,metric='correlation',order = 1,plot = True):
+
+def create_linkage(cluster_idx,corr_array,linkage_method = "average",metric='correlation',order = 1,plot = True):
     '''
     calculates distance metric, linkage and feedback plots
     
@@ -988,6 +1142,8 @@ def create_linkage(cluster_idx,corr_array,metric='correlation',order = 1,plot = 
     -------
     tlinkage: array
         clustering linkage array
+    dist_metric: array
+        distance metric
     -------
     author: CK 2021
     '''
@@ -1003,18 +1159,18 @@ def create_linkage(cluster_idx,corr_array,metric='correlation',order = 1,plot = 
             dist_metric = pairwise_distances(dist_metric, metric=metric,n_jobs = -1)
     
     #Calculate Linkage
-    tlinkage = linkage(dist_metric,method='average',metric=metric)
+    tlinkage = linkage(dist_metric,method=linkage_method,metric=metric)
     
     nr_cluster = 2
     temp_assignment = fcluster(tlinkage,nr_cluster,criterion='maxclust')
     
     #Output plots
     if plot is True:
-        fig, _ = plt.subplots(figsize = (8,8))
-        fig.suptitle(f'Cluster Index: {cluster_idx}')
-    
+        fig = plt.figure(figsize = (8,8))
+        fig.suptitle(f'Cluster Index: {cluster_idx}')    
+        
         #Dist metric
-        ax1 = plt.subplot(2,2,1)
+        ax1 = fig.add_subplot(2,2,1)
         vmi, vma = np.percentile(dist_metric[dist_metric >= 1e-5],[1,99])
         ax1.imshow(dist_metric, vmin = vmi, vmax = vma, cmap = parula, aspect="auto")
         ax1.set_title('Distance metric')
@@ -1022,16 +1178,16 @@ def create_linkage(cluster_idx,corr_array,metric='correlation',order = 1,plot = 
         ax1.set_ylabel('Frame index k')
     
         #Corr map
-        ax2 = plt.subplot(2,2,2,sharex=ax1,sharey=ax1)
+        ax2 = fig.add_subplot(2,2,2,sharex=ax1,sharey=ax1)
         vmi, vma = np.percentile(corr_array[corr_array <= 1-1e-5],[5,95])
         ax2.imshow(corr_array, vmin = vmi, vmax = vma, cmap = parula, aspect="auto")
         ax2.set_title('Correlation map')
         ax2.set_xlabel('Frame index k')
         ax2.set_ylabel('Frame index k')
-        plt.gca().invert_yaxis()
+        ax2.invert_yaxis()
 
         #Assignment plot
-        ax3 = plt.subplot(2,2,3,sharex=ax1)
+        ax3 = fig.add_subplot(2,2,3,sharex=ax1)
         ax3.plot(temp_assignment)
         ax3.set_title('Frame assignment')
         ax3.set_xlabel('Frame index k')
@@ -1040,9 +1196,10 @@ def create_linkage(cluster_idx,corr_array,metric='correlation',order = 1,plot = 
         ax3.set_yticks([1,2])
 
         #Assignment plot
-        ax4 = plt.subplot(2,2,4)
+        ax4 = fig.add_subplot(2,2,4)
         dendrogram(tlinkage, p=100, truncate_mode = 'lastp')
-    
+        plt.show()
+        
     return tlinkage, dist_metric
 
 def cluster_hierarchical(tlinkage,parameter,clusteringOption='maxclust'):
@@ -1059,25 +1216,18 @@ def cluster_hierarchical(tlinkage,parameter,clusteringOption='maxclust'):
         criterion used in forming flat clusters
         - 'inconsistent': cluster inconsistency threshold
         - 'maxcluster': number of total clusters
+        - 'distance' : cutting distance in dendrogram
         
     Returns
     -------
     cluster_assignment: array
         assignment of frames to cluster
     -------
-    author: CK 2021
+    author: CK 2023
     '''
     
-    #Options
-    if clusteringOption == 'maxclust':
-        criterion_ = 'maxclust'
-    elif clusteringOption == 'inconsistent':
-        criterion_ = 'inconsistent'
-    else:
-        print('Error: clustering option not valid!')
-
     #Get cluster
-    cluster_assignment = fcluster(tlinkage,parameter,criterion=criterion_)
+    cluster_assignment = fcluster(tlinkage,parameter,criterion=clusteringOption)
 
     #Feedback
     nr = np.unique(cluster_assignment).shape[0]
@@ -1148,12 +1298,11 @@ def clustering_feedback(cluster_idx,nr,corr_array_large,corr_array_small,dist_me
     #Assignment plot
     ax4 = plt.subplot(2,2,4)
     dendrogram(tlinkage, p=150, truncate_mode = 'lastp')
-
-    plt.tight_layout()
+    plt.show()
     return
 
 
-def process_cluster(cluster, cluster_idx, corr_array, cluster_assignment, order = 1, metric = 'correlation', save=False, plot=True):
+def process_cluster(cluster, cluster_idx, corr_array, cluster_assignment, order = 1, linkage_method = "average", metric = 'correlation', save=False, plot=True):
     '''
     processes a given cluster assignment and adds new subclusters to 'cluster'-list
     
@@ -1209,7 +1358,7 @@ def process_cluster(cluster, cluster_idx, corr_array, cluster_assignment, order 
         if plot is True:
             if len(tmp_assignment) > 1:
                 #Calculate Linkage
-                tlinkage, dist_metric = create_linkage(cluster_idx,corr_array,metric=metric,order = order,plot = False)
+                tlinkage, dist_metric = create_linkage(cluster_idx,corr_array,linkage_method = linkage_method, metric=metric,order = order,plot = False)
                 #Plots
                 clustering_feedback(cluster_idx,ii,tmp_corr_large,tmp_corr_small,dist_metric,tlinkage)
         #Save new cluster
@@ -1223,6 +1372,9 @@ def process_cluster(cluster, cluster_idx, corr_array, cluster_assignment, order 
                             
     return cluster
 
+######################
+# OTHER
+####################
 
 #### From Riccardo Battistelli 
 """
@@ -1241,13 +1393,13 @@ def create_hdf5(dict0,filename, extension=".hdf5"):
 def createHDF5(dict0,filename, extension=".hdf5",f=None):
     '''creates HDF5 data structures strating from a dictionary. supports nested dictionaries'''
 #   print(dict0.keys())
-    
+
 #    try:
 #        f = h5py.File(filename+ ".hdf5", "w")
 #        print("ok")
 #    except OSError:
 #        print("could not read")
-    
+
     if f==None:
          f = h5py.File(filename+ extension, "w")
     
@@ -1255,7 +1407,7 @@ def createHDF5(dict0,filename, extension=".hdf5",f=None):
     if type(dict0) == dict:
         
         for i in dict0.keys():
-            
+
 #            print("create group %s"%i)
 #            print("---")
 #            print(i,",",type(dict0[i]))
