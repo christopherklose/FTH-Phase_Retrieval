@@ -400,7 +400,7 @@ def image_registration(image_unproccessed,image_background, method= "phase_cross
 def func(x, a, b):
     return a*x+b
 
-def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False, print_out = False):
+def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False, verbose = False):
     '''
     Calculates intensity normalization factor between images
     
@@ -422,7 +422,7 @@ def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False,
     plot : bool
         Plot fit if method is correlation
         
-    print_out : bool
+    verbose : bool
         print factor and offset
     
     Returns
@@ -443,7 +443,7 @@ def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False,
         factor = cp.asnumpy(cp.sum(image[crop_s]*image_ref[crop_s])/cp.sum(image_ref[crop_s]*image_ref[crop_s]))
         offset = 0
         
-        if print_out == True:
+        if verbose == True:
             print(f'Intensity correction factor:', factor)
         
     #Not optimized for gpu supportyet
@@ -465,7 +465,7 @@ def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False,
         factor = popt[0]
         offset = popt[1]
         
-        if print_out == True:
+        if verbose == True:
             print(f'Linear Fit: {factor:0.4f}*x + {offset:0.4f}')
         
         if plot == True:
@@ -519,7 +519,7 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop =
             topos,
             method=method,
             crop = crop,
-            print_out=True,
+            verbose=True,
             plot=False,
         )
         images = images/factor - topos - offset
@@ -540,7 +540,7 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop =
                         topos[frames],
                         method=method,
                         crop=crop,
-                        print_out=False,
+                        verbose=False,
                         plot=False,
                     )
                     images[frames] = (
@@ -582,7 +582,7 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop =
                             topo_stack[frames],
                             method=method,
                             crop = crop,
-                            print_out=False,
+                            verbose=False,
                             plot=False,
                         )
                         image_stack[frames] = (
@@ -608,7 +608,7 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop =
                         topos,
                         method=method,
                         crop=crop,
-                        print_out=False,
+                        verbose=False,
                         plot=False,
                     )
                     images[frames] = (
@@ -650,7 +650,7 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop =
                             topo_stack,
                             method=method,
                             crop = crop,
-                            print_out=False,
+                            verbose=False,
                             plot=False,
                         )
                         image_stack[frames] = (
