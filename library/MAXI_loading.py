@@ -11,6 +11,7 @@ from os.path import join
 from os import path
 from glob import glob
 import h5py
+import numpy as np 
 
 
 ##########################################################################
@@ -87,7 +88,9 @@ def generate_filename(raw_folder, file_prefix, file_format, scan_nr):
     # Convert scan number to string
     if type(scan_nr) == int:
         scan_nr = "%05d" % scan_nr
-
+    elif isinstance(scan_nr, np.generic):
+        scan_nr = "%05d" % scan_nr
+        
     # Combine all inputs
     filename = join(raw_folder,file_prefix+scan_nr+file_format)
     
@@ -166,12 +169,9 @@ def load_key(fname, key):
     with h5py.File(fname, "r") as f:
         # Get entry
         entry = str(list(f.keys())[0])
-        
-        # Create empty dictionary
-        data = {}
 
         # Load keys from path
-        data[key] = f[entry][key][()].squeeze()
+        data = f[entry][key][()].squeeze()
         
     return data
 
