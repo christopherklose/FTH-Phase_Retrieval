@@ -59,43 +59,7 @@ def list_data_files(folder, search_key="*"):
     # Get sorted list of files in folder
     files = sorted(glob(join(folder, search_key)))
 
-    return files
-    
-
-def generate_filename(raw_folder, file_prefix, file_format, scan_nr):
-    """
-    Generates filename of the given scan id
-    
-    Parameter
-    =========
-    raw_folder : str
-        folder with raw data
-    file_prefix : str
-        prefix of filename
-    file_format : str
-        file format (ending, e.g. ".nxs")
-    scan_nr : int or str
-        number identifier (id) of the given scan
-        
-    Output
-    ======
-    filename : str
-        full generated filename
-    ======
-    author: ck 2024
-    """
-
-    # Convert scan number to string
-    if type(scan_nr) == int:
-        scan_nr = "%05d" % scan_nr
-    elif isinstance(scan_nr, np.generic):
-        scan_nr = "%05d" % scan_nr
-        
-    # Combine all inputs
-    filename = join(raw_folder,file_prefix+scan_nr+file_format)
-    
-    return filename
-    
+    return files    
 
 # Load any kind of data from measurements
 def load_data(fname, keypath, keys = None):
