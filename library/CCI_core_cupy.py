@@ -433,7 +433,10 @@ def dyn_factor(image,image_ref,method = 'scalarproduct', crop = 0, plot = False,
     author: CK 2023
     '''
     #Do you crop the images?
-    crop_s = np.s_[crop:-1-crop,crop:-1-crop]
+    if crop > 0:
+        crop_s = np.s_[crop:-1-crop,crop:-1-crop]
+    else:
+        crop_s = slice(None)
     
     
     if method == 'scalarproduct':
