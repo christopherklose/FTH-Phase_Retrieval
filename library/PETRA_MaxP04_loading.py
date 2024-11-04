@@ -1,5 +1,5 @@
 """
-Python library for MaxP04 endstation at PETRA III with 2d image detector
+Python library for MAXI chamber from MBI
 
 2024
 @authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
@@ -11,18 +11,21 @@ from os.path import join
 from os import path
 from glob import glob
 import h5py
+import numpy as np 
 
 
 ##########################################################################
 
 # Commonly used hdf5 entries. MaxP04 nexus file structure specific
 mnemonics = dict()
-mnemonics["images"] = "ccd"
-mnemonics["magnet_mT"] = "magnett_read"
-mnemonics["data"] = "/scan/data"
-mnemonics["collection"] = "/scan/instrument/collection"
-mnemonics["energy"] = ""
-
+mnemonics["measurement"] = "measurement"
+mnemonics["ccd"] = "measurement/ccd"
+mnemonics["pre_scan_snapshot"] = "measurement/pre_scan_snapshot"
+mnemonics["energy"] = "measurement/pre_scan_snapshot/energy"
+mnemonics["helicity"] = "measurement/pre_scan_snapshot/helicity"
+mnemonics["magOOP"] = "measurement/pre_scan_snapshot/magOOP"
+mnemonics["magIP"] = "measurement/pre_scan_snapshot/magIP"
+mnemonics["cmos"] = "measurement/cmos"
 
 ##########################################################################
 
@@ -85,7 +88,9 @@ def generate_filename(raw_folder, file_prefix, file_format, scan_nr):
     # Convert scan number to string
     if type(scan_nr) == int:
         scan_nr = "%05d" % scan_nr
-
+    elif isinstance(scan_nr, np.generic):
+        scan_nr = "%05d" % scan_nr
+        
     # Combine all inputs
     filename = join(raw_folder,file_prefix+scan_nr+file_format)
     
@@ -115,27 +120,36 @@ def load_data(fname, keypath, keys = None):
     """
     
     with h5py.File(fname, "r") as f:
+        # Get entry
+        entry = str(list(f.keys())[0])
+
         # Create empty dictionary
         data = {}
 
         # Load all keys of path
         if keys == None:
-            for key in f[keypath].keys():
-                data[key] = f[keypath][key][()]
+            for key in list(f[entry][keypath].keys()):
+                try:
+                    data[key] = f[entry][keypath][key][()].squeeze()
+                except:
+                    pass
         # Load only keys from key list
         elif isinstance(keys, list):
             for key in keys:
-                data[key] = f[keypath][key][()]
+                try:
+                    data[key] = f[entry][keypath][key][()].squeeze()
+                except:
+                    pass
         # Load only single key
         else:
-            data[keys] = f[keypath][keys][()]
+            data[keys] = f[entry][keypath][keys][()].squeeze()
 
-    return data
+        return data
 
 # Load any kind of data from measurements
 def load_key(fname, key):
     """
-    Load any kind of data from 
+    Load any kind of data specified by key (path)
     
     Parameter
     =========
@@ -153,11 +167,11 @@ def load_key(fname, key):
     """
     
     with h5py.File(fname, "r") as f:
-        # Create empty dictionary
-        data = {}
+        # Get entry
+        entry = str(list(f.keys())[0])
 
         # Load keys from path
-        data[key] = f[key][()]
+        data = f[entry][key][()].squeeze()
         
     return data
 
@@ -182,6 +196,6 @@ def load_images(fname):
     """
 
     # Load only relevant image data
-    data = load_data(fname, mnemonics["data"], keys = [mnemonics["images"]])
+    data = load_data(fname, mnemonics["measurement"], keys = [mnemonics["images"]])
 
     return data[mnemonics["images"]].squeeze()
