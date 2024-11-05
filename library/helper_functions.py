@@ -412,3 +412,7 @@ def complex_to_color(array, abs_range=[0, 100]):
     saturation = 1 * np.ones(array.shape)
 
     return hls_to_rgb(np.stack((hue, lightness, saturation), axis=2))
+
+def log_clip(arr):
+    arr = arr - np.min(arr) + 0.01
+    return np.log10(arr)
