@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from matplotlib.path import Path
 
 # scipy
@@ -429,3 +430,93 @@ def mask_postprocessing(mask, radius, expand):
     )
     
     return mask
+
+
+
+def arc_mask(
+        shape,
+        center,
+        radius_range: tuple[float, float],
+        angle_range: tuple[float, float],
+        sigma=None,
+    ) -> NDArray[np.float64]:
+        """Binary annular-sector mask with optional Gaussian edge smoothing.
+
+        Returns a 2-D array (broadcast from ``shape``) with 1 inside the arc
+        and 0 outside. Values are in [0, 1] after smoothing.
+
+        Parameter
+        =========
+        shape: int tuple
+            shape of final mask
+        center: tuple
+            center position of arc
+        radius_range: tuple
+            radius of inner and outer part of arc
+        angle_range: tuple
+            angular range of arc in radians
+        sigma: float or None
+            smoothing std of gaussian filter applied for mask smoothing
+    
+        Output
+        ======
+        mask: array
+            binary mask
+        ======
+        author: ck 2026
+        """
+        ny, nx = shape
+        dy = np.arange(ny, dtype=float)[:, None] - center[0]
+        dx = np.arange(nx, dtype=float)[None, :] - center[1]
+
+        r = np.sqrt(dy**2 + dx**2)
+        phi = np.arctan2(dy, dx)
+
+        inner_radius = radius_range[0]
+        outer_radius = radius_range[1]
+        radial_mask = (r >= inner_radius) & (r <= outer_radius)
+
+        angle_start, angle_end = angle_range
+        angle_start = (angle_start + np.pi) % (2 * np.pi) - np.pi
+        angle_end = (angle_end + np.pi) % (2 * np.pi) - np.pi
+        if angle_end >= angle_start:
+            angular_mask = (phi >= angle_start) & (phi <= angle_end)
+        else:
+            angular_mask = (phi >= angle_start) | (phi <= angle_end)
+
+        mask = (radial_mask & angular_mask).astype(float)
+        if sigma is not None and sigma != 0:
+            mask = gaussian_filter(mask, sigma)
+        return mask
+
+def create_arc_supportmask(shape,support_coordinates):
+    """
+    Create cdi support mask from a combination of multiple arc apertures
+
+    Parameter
+    =========
+    shape : int tuple
+        shape/dimension of output array
+    support_coordinates: nested list
+        Contains parameters of arc_hole of each aperture
+        [[center_1,radius_range_1,angular_range_1],[center_2,radius_range_2,angular_range_2],...]
+
+
+    Output
+    ======
+    supportmask: array
+        composed binary mask where arc apertures are "1"
+    ======
+    author: ck 2023
+
+    """
+
+    # Create support mask
+    supportmask = np.zeros(shape)
+    for i in range(len(support_coordinates)):
+        supportmask += arc_mask(
+            supportmask.shape,
+            *support_coordinates[i],
+        )
+
+    return supportmask

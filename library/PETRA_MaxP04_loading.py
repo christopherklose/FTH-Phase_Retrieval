@@ -23,13 +23,15 @@ mnemonics["magnet_mT"] = "/scan/data/m_caena"
 mnemonics["magnet_A"] = "/scan/data/m_magnetA"
 mnemonics["data"] = "/scan/data"
 mnemonics["collection"] = "/scan/instrument/collection"
-mnemonics["energy"] = "/scan/instrument/collection/mono"
+mnemonics["energy"] = "/scan/instrument/mono/energy"
 mnemonics["marana"] = "measurement/m_marana"
 mnemonics["measurement"] = "/scan/instrument/collection"
 mnemonics["helicity"] = "measurement/pre_scan_snapshot/und_shift"
 mnemonics["nx_marana"] = "/entry/instrument/detector/data"
 mnemonics["framerate"] = "/entry/instrument/detector/framerate"
 mnemonics["temperature"] = "/scan/data/cryoin4"
+mnemonics["diode"] = "/scan/data/adc_beck_femto_diodemax"
+mnemonics["magnet"] = "/scan/instrument/collection/m_caena"
 
 ##########################################################################
 

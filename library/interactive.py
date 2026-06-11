@@ -34,6 +34,8 @@ from pyFAI.detectors import Detector
 import skimage.morphology
 from dipy.segment.mask import median_otsu
 
+from mask_lib import create_arc_supportmask, arc_mask
+
 
 #########################################
 # Helper functions
@@ -990,6 +992,163 @@ class InteractiveEllipseCoordinates:
         """Return list of tuples with mask parameters (center, height, width, angle)"""
         return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
 
+
+class InteractiveArcCoordinates:
+    def __init__(self, image, num_masks, coordinates=None):
+        self.image = image
+        self.num_masks = num_masks
+        self._updating = False
+        self.init_masks(coordinates)
+        self.draw_gui()
+
+    def coordinates_to_dict(self, coordinate):
+        return {
+            "centery": coordinate[0][0],
+            "centerx": coordinate[0][1],
+            "r0": coordinate[1][0],
+            "r1": coordinate[1][1],
+            "phi0": coordinate[2][0],
+            "phi1": coordinate[2][1],
+        }
+
+    def init_masks(self, coordinates):
+        if coordinates is None:
+            coordinates = []
+            for n in range(self.num_masks):
+                coordinates.append([
+                    (self.image.shape[0] / 2, self.image.shape[1] / 2),
+                    [50, 100],
+                    [0, np.pi]
+                ])
+
+        self.mask_objects = [self.coordinates_to_dict(coordinate) for coordinate in coordinates]
+        self.masks = [arc_mask(self.image.shape, *coordinates[n]) for n in range(self.num_masks)]
+        self.project_masks()
+
+    def project_masks(self):
+        active_index = self.widgets["mask_index"].value if hasattr(self, "widgets") else 0
+        h, w = self.image.shape[:2]
+        overlay = np.zeros((h, w, 4), dtype=float)
+
+        for i, mask in enumerate(self.masks):
+            m = mask.astype(float)
+            if i == active_index:
+                overlay[..., 0] = np.maximum(overlay[..., 0], m)
+                overlay[..., 3] = np.maximum(overlay[..., 3], m * 0.5)
+            else:
+                overlay[..., 2] = np.maximum(overlay[..., 2], m)
+                overlay[..., 3] = np.maximum(overlay[..., 3], m * 0.3)
+
+        self.mask = overlay
+
+    def draw_gui(self):
+        """Create plot and control widgets."""
+
+        self.fig, self.ax = plt.subplots(figsize=(6, 6))
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
+        self.mm = self.ax.imshow(self.image, vmin=vmin, vmax=vmax, cmap='gray')
+        self.m2 = self.ax.imshow(self.mask)
+
+        self.widgets = {
+            "contrast": widgets.FloatRangeSlider(
+                value=(vmin, vmax),
+                min=cmin,
+                max=cmax,
+                step=(vmax - vmin) / 500,
+                layout=ipywidgets.Layout(width="500px"),
+            ),
+            "mask_index": widgets.IntSlider(min=0, max=self.num_masks - 1, value=0),
+            "centery": widgets.FloatSlider(
+                min=0, max=self.image.shape[0], value=self.image.shape[0] / 2,
+                step=0.5, description="centery", layout=ipywidgets.Layout(width="350px"),
+            ),
+            "centerx": widgets.FloatSlider(
+                min=0, max=self.image.shape[1], value=self.image.shape[1] / 2,
+                step=0.5, description="centerx", layout=ipywidgets.Layout(width="350px"),
+            ),
+            "inner_radius": widgets.FloatSlider(
+                min=0, max=np.array(self.image.shape).max() / 2, value=50,
+                step=0.5, description="inner_radius", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "outer_radius": widgets.FloatSlider(
+                min=0, max=np.array(self.image.shape).max() / 2, value=100,
+                step=0.5, description="outer_radius", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "start_angle": widgets.FloatSlider(
+                min=0, max=2 * np.pi, value=0,
+                step=0.0125, description="start_angle",readout_format=".4f", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "end_angle": widgets.FloatSlider(
+                min=0, max=2 * np.pi, value=np.pi,
+                step=0.0125, description="end_angle", readout_format=".4f",layout=ipywidgets.Layout(width="450px"),
+            ),
+        }
+
+        ipywidgets.interact(self.update_clim, contrast=self.widgets["contrast"])
+        widgets.interact(self.update_controls, index=self.widgets["mask_index"])
+        widgets.interact(
+            self.update_arc,
+            centery=self.widgets["centery"],
+            centerx=self.widgets["centerx"],
+            inner_radius=self.widgets["inner_radius"],
+            outer_radius=self.widgets["outer_radius"],
+            start_angle=self.widgets["start_angle"],
+            end_angle=self.widgets["end_angle"],
+        )
+
+    def update_clim(self, contrast):
+        self.mm.set_clim(contrast)
+
+    def update_controls(self, index):
+        """Update control widget values with selected circle parameters."""
+        self._updating = True
+        arc = self.mask_objects[index]
+        self.widgets["centery"].value = arc["centery"]
+        self.widgets["centerx"].value = arc["centerx"]
+        self.widgets["inner_radius"].value = arc["r0"]
+        self.widgets["outer_radius"].value = arc["r1"]
+        self.widgets["start_angle"].value = arc["phi0"]
+        self.widgets["end_angle"].value = arc["phi1"]
+        self._updating = False
+        self.project_masks()
+        self.update_image()
+
+    def update_arc(self, centery, centerx, inner_radius, outer_radius, start_angle, end_angle):
+        if self._updating:
+            return
+        index = self.widgets["mask_index"].value
+        arc_dict = {
+            "centery": centery,
+            "centerx": centerx,
+            "r0": inner_radius,
+            "r1": outer_radius,
+            "phi0": start_angle,
+            "phi1": end_angle,
+        }
+        self.mask_objects[index].update(arc_dict)
+        self.masks[index] = arc_mask(self.image.shape, *self.dict_to_params(arc_dict))
+        self.project_masks()
+        self.update_image()
+
+        print("Aperture Coordinates:")
+        print(self.get_params())
+
+    def update_image(self):
+        self.m2.set_data(self.mask)
+
+    def dict_to_params(self, arc_dict):
+        return [
+            [arc_dict["centery"], arc_dict["centerx"]],
+            [arc_dict["r0"], arc_dict["r1"]],
+            [np.round(arc_dict["phi0"],3), np.round(arc_dict["phi1"],3)],
+        ]
+
+    def get_params(self):
+        """Return list of tuples with mask parameters (center, height, width, angle)"""
+        return [self.dict_to_params(arc_dict) for arc_dict in self.mask_objects]
+
+    def return_mask(self):
+        return np.clip(np.sum(self.masks,axis=0),0,1)
 
 class Shift_Scale_Mask:
     """Plot image with controls for contrast, x/y shift and scaling."""
