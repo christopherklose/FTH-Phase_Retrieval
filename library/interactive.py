@@ -27,8 +27,7 @@ from matplotlib.patches import Ellipse
 import ipywidgets
 import ipywidgets as widgets
 
-import pyFAI
-from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+from pyFAI.integrator.azimuthal import AzimuthalIntegrator
 from pyFAI.detectors import Detector
 
 import skimage.morphology
@@ -305,8 +304,8 @@ class AzimuthalIntegrationCenter:
         self.c1 = c1
         self.radial_range = kwargs["radial_range"]
         self.im_data_range = kwargs["im_data_range"]
-        self.pixel_size1 = ai.detector.get_pixel1()
-        self.pixel_size2 = ai.detector.get_pixel2()
+        self.pixel_size1 = ai.detector.pixel1
+        self.pixel_size2 = ai.detector.pixel2
         self.qlines = kwargs["qlines"]
         self.ai = ai
         self.mask = mask
