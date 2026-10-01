@@ -8,6 +8,7 @@ Python library for some general functions for paths, data processing, ...
 import sys, os
 import glob
 import fnmatch
+import importlib.util
 from tqdm.auto import tqdm
 
 import numpy as np
@@ -75,6 +76,46 @@ def list_files_excluding_pattern(directory, pattern):
                 excluded_files.append(os.path.join(root, file))
 
     return sorted(excluded_files)
+
+#======================
+#Modules
+#======================
+def import_cpu_only(module_name="CCI_core"):
+    '''
+    Loads a separate copy of a module with FTH_CDI_FORCE_CPU=1, i.e., a copy
+    that uses the CPU even if a GPU is available. The already imported
+    (GPU) version of the module is not affected.
+
+    Parameter
+    =========
+    module_name : str
+        name of the module, e.g., "CCI_core"
+
+    Output
+    ======
+    module : module
+        independent CPU-only copy of the module
+    ======
+    author: ck 2026
+    '''
+
+    spec = importlib.util.find_spec(module_name)
+    if spec is None:
+        raise ImportError(f"Module '{module_name}' not found")
+
+    old_value = os.environ.get("FTH_CDI_FORCE_CPU")
+    os.environ["FTH_CDI_FORCE_CPU"] = "1"
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        # Restore the previous setting
+        if old_value is None:
+            del os.environ["FTH_CDI_FORCE_CPU"]
+        else:
+            os.environ["FTH_CDI_FORCE_CPU"] = old_value
+
+    return module
 
 #======================
 #Physics
