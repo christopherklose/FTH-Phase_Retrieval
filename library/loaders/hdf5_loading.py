@@ -17,6 +17,7 @@ from os import path
 from glob import glob
 import h5py
 import numpy as np
+from pathlib import Path
 
 
 ##########################################################################
@@ -253,3 +254,42 @@ def load_key(fname, key):
         data = f[entry][key][()].squeeze()
 
     return data
+
+
+def _write_group(group, data):
+    """Recursively write a dict into an HDF5 group. Nested dicts become subgroups; None values are skipped."""
+    for key, value in data.items():
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            _write_group(group.create_group(key), value)
+        else:
+            group.create_dataset(key, data=value)
+
+
+def _read_group(group, verbose=False, indent=0):
+    """Recursively read an HDF5 group into a (nested) dict."""
+    out = {}
+    pad = "    " * indent
+    for key, item in group.items():
+        if isinstance(item, h5py.Group):
+            if verbose:
+                print(f"{pad}### {key}")
+            out[key] = _read_group(item, verbose, indent + 1)
+        else:
+            out[key] = item[()]
+            if verbose:
+                print(f"{pad}• {key:<25} {type(out[key]).__name__}")
+    return out
+
+
+def create_hdf5(data, filename, extension=".hdf5"):
+    """Write a (nested) dict to an HDF5 file."""
+    with h5py.File(Path(f"{filename}{extension}"), "w") as f:
+        _write_group(f, data)
+
+
+def read_hdf5(filename, print_option=True):
+    """Read an HDF5 file into a (nested) dict."""
+    with h5py.File(Path(f"{filename}"), "r") as f:
+        return _read_group(f, verbose=print_option)
