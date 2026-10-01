@@ -255,14 +255,20 @@ def image_registration(
     image_background: array
         static reference image
 
+    method: str
+        registration method: "phase_cross_correlation" (skimage) or
+        "dipy" (mutual information)
+
     static_mask: array
-        ignore masked pixel in static image
+        ignore masked pixel in static image (only method "dipy")
 
     moving_mask: array
-        ignore masked pixel in moving image
+        ignore masked pixel in moving image (only method "dipy")
 
-    roi: region of interest defining the region of the images used to calc
-        the alignment
+    roi: list of int or None
+        region of the images used to calc the alignment in the order
+        [xstart, xstop, ystart, ystop] (only method "phase_cross_correlation").
+        Note: this is not the [ystart, ystop, xstart, xstop] order used in the notebooks.
 
     im_out: bool
         return also shifted image if true
@@ -270,7 +276,7 @@ def image_registration(
     Returns
     -------
     image_corrected: array
-        Shifted/aligned moving image
+        Shifted/aligned moving image (only returned if im_out is True)
     shift: array
         shift (dy,dx)
     -------
@@ -373,6 +379,8 @@ def dyn_factor(
     -------
     factor: scalar
         Intensity correction factor
+    offset: scalar
+        Intensity offset of the linear fit (always 0 for method "scalarproduct")
     -------
     author: CK 2023
     """
@@ -445,8 +453,9 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop=0
     images: nr_images x dim1 x dim2 array
         image stack
 
-    topo: nr_images x dim1 x dim2 array
-        reference images which will be subtracted after intensity normalization
+    topos: nr_images x dim1 x dim2 array or dim1 x dim2 array
+        reference images which will be subtracted after intensity normalization.
+        A single 2d topo is used for all frames.
 
     chunk_sz: int
         nr of images per chunk, needed in case of large image arrays which might not fit into gpu memory
@@ -768,12 +777,17 @@ def seg_statistics(holo, mask, NrStd=1, verbose=False):
         Predefined mask to calculate std and mean
     NrStd: scalar, optional
         Multiplication factor of the standard deviation to count a pixel as noise. Default is 1.
-
+    verbose: bool, optional
+        print mean, std and noise intervall
 
     Returns
     -------
     statistics mask: array
         bool mask of values larger than noise level
+    MEAN: float
+        mean of the noise distribution (NaN-safe)
+    STD: float
+        standard deviation of the noise distribution (NaN-safe)
     -------
     author: CK 2022
     """
@@ -802,12 +816,14 @@ def seg_statistics(holo, mask, NrStd=1, verbose=False):
 
 def create_ring_mask(shape, center, radi):
     """
-    Creates mask that shows only value outside of a noise intervall defined by the statistics of the array
+    Creates concentric ring masks, e.g., to select q-ranges of a hologram
 
     Parameters
     ----------
     shape : int tuple
         shape of output arrays
+    center : tuple
+        center coordinates of the rings (ycenter, xcenter)
     radi: list of int
         list of radi in px to create centered rings in q-space radi=[r1,r2,r3,...].
 
@@ -847,7 +863,9 @@ def correlation_map_masks(
     symmetrize: bool = True,
 ) -> ArrayLike:
     """
-    Function to calculate (unnormalized) Pearson cross-correlation map of array along first axis.
+    Function to calculate the normalized (not mean-centered) cross-correlation
+    map of an image stack along the first axis, evaluated on the union of the
+    masks of each image pair.
 
     corr[i,j] = sum( img_i * img_j * union_mask(i,j) ) /
                     sqrt( sum(img_i^2 * union_mask(i,j)) * sum(img_j^2 * union_mask(i,j)) )
@@ -856,10 +874,17 @@ def correlation_map_masks(
 
     Parameters
     ----------
-    image_stack : d1xd2xd3 numpy array (d1: nr holos, d2,d3: shape of single holo)
+    image_stack : d1xd2xd3 array (d1: nr holos, d2,d3: shape of single holo)
         array of images to be correlated
-    statistics_mask : d1xd2xd3 numpy array (d1: nr holos, d2,d3: shape of single holo)
-        array for each image with bool mask of pixels with values larger than noise level (stack), must be of the same length as diff_holo_norm
+    mask_stack : d1xd2xd3 array (d1: nr holos, d2,d3: shape of single holo)
+        bool mask for each image, e.g., pixels with values larger than noise level,
+        must be of the same length as image_stack
+    image_dtype : dtype
+        dtype used for the calculation
+    return_numpy : bool
+        return a numpy array (True) or keep the result on the GPU (False)
+    symmetrize : bool
+        enforce a symmetric correlation map
 
     Returns
     -------
@@ -967,10 +992,20 @@ def correlation_map_masks_batched(
 
     Parameters
     ----------
-    image_stack : d1xd2xd3 numpy array (d1: nr holos, d2,d3: shape of single holo)
+    image_stack : d1xd2xd3 array (d1: nr holos, d2,d3: shape of single holo)
         array of images to be correlated
-    statistics_mask : d1xd2xd3 numpy array (d1: nr holos, d2,d3: shape of single holo)
-        array for each image with bool mask of pixels with values larger than noise level (stack), must be of the same length as diff_holo_norm
+    mask_stack : d1xd2xd3 array (d1: nr holos, d2,d3: shape of single holo)
+        bool mask for each image, e.g., pixels with values larger than noise level,
+        must be of the same length as image_stack
+    batch_size : int
+        nr of columns of the correlation map computed per batch
+    image_dtype : dtype
+        dtype used for the calculation
+    return_numpy : bool
+        return a float32 numpy array (True) or keep the result in image_dtype
+        on the GPU (False)
+    symmetrize : bool
+        enforce a symmetric correlation map
 
     Returns
     -------
@@ -1109,12 +1144,16 @@ def correlation_map_fast(in_array):
 
     Parameters
     ----------
-    in_array : d1xd2xd3 array (d1: nr images, d2,d3: shape of single image)
+    in_array : d1xd2xd3 or d1xd2 array (d1: nr images, d2(,d3): shape of single image)
         array of scattering images (stack)
     Returns
     -------
-    corr_map : array
-        correlation map where every image is correlatetd to each other image of input
+    corr_map_nonorm : array
+        pixel-averaged products of all image pairs (no normalization)
+    corr_map_pearson : array
+        correlation map normalized by the image norms (not mean-centered)
+    corr_map_sutton : array
+        correlation map normalized by the mean intensities (Sutton)
     -------
     author: CK 2022
     """
@@ -1166,9 +1205,8 @@ def mutual_information_metric_from_correlation(
     metric_array: ArrayLike, log_base: int = 2
 ):
     """
-    Script Reconstruct the cluster's correlation map from the given
-    cluster's 'frames' and the (large) correlation map of all
-    frames.
+    Converts a correlation-like metric rho into the mutual information of a
+    bivariate Gaussian, MI = -0.5 * log(1 - rho^2). The diagonal is set to zero.
 
     Parameters
     ----------
@@ -1336,7 +1374,7 @@ def create_linkage_fast(
 
 def cluster_hierarchical(tlinkage, parameter, clusteringOption="maxclust"):
     """
-    calculates distance metric, linkage and feedback plots
+    Forms flat clusters from a linkage (scipy fcluster)
 
     Parameters
     ----------
@@ -1347,7 +1385,7 @@ def cluster_hierarchical(tlinkage, parameter, clusteringOption="maxclust"):
     clusteringOption: string
         criterion used in forming flat clusters
         - 'inconsistent': cluster inconsistency threshold
-        - 'maxcluster': number of total clusters
+        - 'maxclust': number of total clusters
         - 'distance' : cutting distance in dendrogram
 
     Returns
@@ -1372,7 +1410,8 @@ def clustering_feedback(
     cluster_idx, nr, corr_array_large, corr_array_small, dist_metric_sq, tlinkage
 ):
     """
-    calculates distance metric, linkage and feedback plots
+    Feedback plots of a new subcluster: correlation maps, distance metric
+    and dendrogram
 
     Parameters
     ----------
@@ -1391,7 +1430,7 @@ def clustering_feedback(
 
     Returns
     -------
-    fig with plots
+    None (shows the figure)
     -------
     author: CK 2021
     """
@@ -1711,7 +1750,7 @@ def reorder_cluster(cluster: list, ordering_criteria: str = "time") -> list:
     =========
     cluster : list of dict
         meta information of each cluster
-    criteria : str
+    ordering_criteria : str
         ordering method:
             "frames": number of frames (descending)
             "time": strict chronologically
@@ -1762,7 +1801,7 @@ def reorder_cluster(cluster: list, ordering_criteria: str = "time") -> list:
 
 def create_assignment(cluster: list, assignment_length: int) -> ArrayLike:
     """
-    Extract assignment from list of cluster based on "cluster_frames" entry
+    Extract assignment from list of cluster based on "Cluster_Frames" entry
 
     Parameter
     =========

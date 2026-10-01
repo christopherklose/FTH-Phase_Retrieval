@@ -99,7 +99,8 @@ def create_single_polygon_mask(shape, coordinates):
     shape : int tuple
         shape/dimension of output array
     coordinates: nested list
-        coordinates of polygon corner points [(yc_1,xc_1),(yc_2,xc_2),...]
+        coordinates of polygon corner points [(xc_1,yc_1),(xc_2,yc_2),...]
+        (matplotlib order, as returned by interactive.draw_polygon_mask)
 
 
     Output
@@ -131,7 +132,7 @@ def create_polygon_mask(shape, coordinates):
         shape/dimension of output array
     coordinates: nested list
         coordinates of polygon corner points for multiple polygons
-        [[(yc_1,xc_1),(yc_2,xc_2),...],[(yc_1,xc_1),(yc_2,xc_2),...]]
+        [[(xc_1,yc_1),(xc_2,yc_2),...],[(xc_1,yc_1),(xc_2,yc_2),...]]
 
     Output
     ======
@@ -162,6 +163,8 @@ def load_poly_masks(shape, mask_dict, polygon_name_list):
     =========
     shape : tuple
         shape of output mask
+    mask_dict : dict
+        polygon coordinates of all stored masks, {name: nested list of corner points}
     polygon_name_list : list
         keys of different mask coordinates to load
 
@@ -326,8 +329,9 @@ def create_ellipse_supportmask(support_coordinates, shape):
     Parameter
     =========
     support_coordinates: nested list
-        Contains center coordinates, height, width and rotation angle of each aperture
-        [[(yc_1,xc_1),height_1,width_1,angle_1],[(yc_2,xc_2),height_2,width_2,angle_2],...]
+        Contains center coordinates, height, width and rotation angle (degrees) of each aperture
+        [[(xc_1,yc_1),height_1,width_1,angle_1],[(xc_2,yc_2),height_2,width_2,angle_2],...]
+        (as returned by interactive.InteractiveEllipseCoordinates)
     shape : int tuple
         shape/dimension of output array
 
@@ -365,7 +369,8 @@ def create_ellipse_supportmask(support_coordinates, shape):
 
 def automated_beamstop_center(image, threshold, radius, expand, method = "intensity"):
     """
-    Automatically determine beamstop close to center using otsu thresholding
+    Automatically determine beamstop close to center by thresholding
+    (intensity, gradient or otsu). Care: method "otsu" modifies the input image.
 
     Parameter
     =========

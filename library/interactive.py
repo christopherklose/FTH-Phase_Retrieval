@@ -568,7 +568,7 @@ class draw_polygon_mask:
         return self.round_nested_list(self.coordinates,1)
 
 class InteractiveAutoBeamstop:
-    """Plot image with controls for contrast and beamstop alignment tools."""
+    """Plot image with controls for contrast and the automated beamstop mask (threshold, radius, expand)."""
 
     def __init__(self, image, thres, radius, expand, method="intensity", **kwargs):
         self.image = image
@@ -856,7 +856,7 @@ class InteractiveCircleCoordinates:
             self.widgets["c1"].value = c1
 
     def get_params(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return list of tuples with mask parameters (ycenter, xcenter, radius)"""
         return [(np.round(c.center[1],1),np.round(c.center[0],1), np.round(c.radius,1)) for c in self.masks]
 
 
@@ -988,7 +988,7 @@ class InteractiveEllipseCoordinates:
             self.widgets["c1"].value = c1
 
     def get_params(self):
-        """Return list of tuples with mask parameters (center, height, width, angle)"""
+        """Return list of tuples with mask parameters ((xcenter, ycenter), height, width, angle in degrees)"""
         return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
 
 
@@ -1143,7 +1143,7 @@ class InteractiveArcCoordinates:
         ]
 
     def get_params(self):
-        """Return list of tuples with mask parameters (center, height, width, angle)"""
+        """Return list of mask parameters [[ycenter, xcenter], [r0, r1], [phi0, phi1]] (input for mask_lib.create_arc_supportmask)"""
         return [self.dict_to_params(arc_dict) for arc_dict in self.mask_objects]
 
     def return_mask(self):
@@ -1235,12 +1235,12 @@ class Shift_Scale_Mask:
             self.update_mask(shift[0],shift[1],self.scale)
         
     def get_mask(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return shifted and scaled mask, shift [vertical, horizontal] and scale"""
         return self.mask, self.shift, self.scale
 
 
 class Shift_Rotate:
-    """Plot image with controls for contrast, x/y shift and scaling."""
+    """Plot image with controls for contrast, x/y shift and rotation."""
     
     def __init__(self, image, shift = [0,0], angle = 0, ticks = None):
         self.image = image
@@ -1330,7 +1330,7 @@ class Shift_Rotate:
             self.update_image(shift[0],shift[1],self.angle)
         
     def get_parameter(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return shifted and rotated image, shift [vertical, horizontal] and rotation angle"""
         return self.image, self.shift, self.angle
 
 
@@ -1339,16 +1339,17 @@ def focusCDI(pos,neg, roi, mask=1,phase=0, prop_dist=0,dx=0, dy=0, scale=(0,100)
     Applies a sub-pixel centering, propagation distance and global phase shift.
     Also plots real,image,abs,angle images while you do it
     INPUT:  pos,neg: array, the shifted and masked holograms
-            mask: optional array, =1 in the region you want to consider, =0 elsewhere. Limits of the colormaps are going to be chosen in this region
-            roi: array, coordinates of the ROI in the order [Xstart, Xstop, Ystart, Ystop]
+            mask: optional array, =1 in the region you want to consider, =0 elsewhere. Limits of the colormaps are going to be chosen in this region (default: whole image)
+            roi: slice, region of interest as np.s_[ystart:ystop, xstart:xstop]
             phase: optional, float, starting value for the phase slider (default is 0)
-            prop_dist: optional, float, starting value for the propagation slider (default is 0)
+            prop_dist: optional, float, starting value for the propagation slider in um (default is 0)
+            dx, dy: optional, float, starting values for the sub-pixel shift of neg (default is 0)
             scale: optional, tuple of floats, values for the scaling using percentiles (default is (0, 100))
             experimental_setup: dictionary containing:
              - ccd_dist: optional, float, distance between CCD and sample in meter (default is 18e-2 (m))
              - energy: optional, float, energy of the x-rays in eV (default is 779.5 (eV))
              - px_size: optional, float, physical size of the CCD pixel in m (default is 20e-6 (m))
-            operation: the operation you'll do on those holograms (-,/,+,-/+, load_both)
+            operation: the operation you'll do on those holograms ("-", "+", "/", "log", "-/+")
             max_prop_dist: maximum value for propagated distances
     OUPUT:  sliders for the propagation, phase, subpixel shift distances in x and y
             When you are finished, you can save the positions of the sliders.

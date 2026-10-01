@@ -166,8 +166,8 @@ def load_key(fname, key):
    
     Output
     ======
-    data : dict
-        data dictionaray on single key
+    data : array
+        data of the given key
     ======
     author: ck 2024
     """
@@ -190,9 +190,7 @@ def load_images(fname):
     =========
     fname : str
         filename of data file
-    im_id : int
-        experiment data identifier number
-        
+
     Output
     ======
     images : array

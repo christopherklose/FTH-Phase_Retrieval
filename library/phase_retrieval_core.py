@@ -132,7 +132,8 @@ def phase_retrieval_algorithm(
         - mask_pixel == 0 : valid pixels
         - mask_pixel != 0 : masked pixels
     supportmask : array_like
-        2D support mask (same shape as pos/neg). Used to generate a default start image.
+        2D support mask (same shape as pos/neg). Real-space constraint of the phase
+        retrieval; also used to generate the default start image.
     phase_retrieval_recipe : dict, optional
         Overrides for algorithm and iteration settings. Supported keys include:
         - algorithm_list_full_coherence : list[str] (length multiple of 3)
@@ -164,6 +165,11 @@ def phase_retrieval_algorithm(
         mutual coherence function positive helicity
     gamma_n: ArrayLike
         mutual coherence function negative helicity
+    error: dict
+        tracked diffraction errors in dB of each step, keys "error_p_it_1",
+        "error_p_it_2", "error_n_it_3" (full coherence) and "error_p_pc_it_1",
+        "error_p_pc_it_2", "error_n_pc_it_3" (partial coherence, if used).
+        Input for plot_phase_retrieval_errors.
     -------
     author: CK 2026
     """
@@ -463,7 +469,8 @@ def single_helicity_phase_retrieval_algorithm(
         - mask_pixel == 0 : valid pixels
         - mask_pixel != 0 : masked pixels
     supportmask : array_like
-        2D support mask (same shape as pos). Used to generate a default start image.
+        2D support mask (same shape as pos). Real-space constraint of the phase
+        retrieval; also used to generate the default start image.
     phase_retrieval_recipe : dict, optional
         Overrides for algorithm and iteration settings. Supported keys include:
         - algorithm_list_full_coherence : list[str] (length multiple of 3)
@@ -690,14 +697,23 @@ def phase_retrieval_algorithm_on_second_helicity_only(
 
     Parameters
     ----------
-    topo, new_helicity : array_like
+    new_helicity, topo : array_like
         2D hologram intensity images (same shape). Values may contain NaNs.
+        new_helicity is phase retrieved, topo is used for the normalization
+        of the start image.
+    retrieved_topo : array_like
+        phase retrieved topo (full coherence), used as start image
+    retrieved_topo_pc : array_like
+        phase retrieved topo (partial coherence), used as start image
+    gamma_topo : array_like
+        mutual coherence function retrieved from the topo
     mask_pixel : array_like
         2D mask (same shape as topo/new_helicity). Convention assumed:
         - mask_pixel == 0 : valid pixels
         - mask_pixel != 0 : masked pixels
     supportmask : array_like
-        2D support mask (same shape as topo/new_helicity). Used to generate a default start image.
+        2D support mask (same shape as topo/new_helicity). Real-space constraint
+        of the phase retrieval.
     phase_retrieval_recipe : dict, optional
         Overrides for algorithm and iteration settings. Supported keys include:
         - algorithm_list_full_coherence : list[str] (length multiple of 3)
@@ -890,6 +906,16 @@ def phase_retrieval_algorithm_on_second_helicity_only(
 def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
     """
     Plot tracked phase retrieval errors and return concatenated error list.
+
+    Parameters
+    ----------
+    error : dict
+        error dictionary returned by phase_retrieval_algorithm
+    phase_retrieval_recipe : dict
+        recipe used for the phase retrieval (missing keys are taken from
+        default_phase_retrieval_recipe(); the dict is not modified)
+    ax : matplotlib.axes.Axes, optional
+        axis to plot into, a new figure is created if None
 
     Returns
     -------
@@ -1273,7 +1299,7 @@ def PhaseRtrv_GPU(
     mask : array_like (2D)
         Support mask in real space (0/1). Same shape as diffract.
     mode : str
-        Algorithm: ER, SF, mine, RAAR, HIOs, HIO, OSS, CHIO, HPR.
+        Algorithm: ER, SF, HAPRE, RAAR, HIOs, HIO, OSS, CHIO, HPR.
     Nit : int
         Number of iterations.
     beta_zero : float
@@ -1448,18 +1474,53 @@ def PhaseRtrv_with_RL(
     """
     Iterative phase retrieval with GPU acceleration and Richardson–Lucy updates (partial coherence).
 
-    This refactor applies the same improvements as in PhaseRtrv_GPU:
-      - projection step dispatched by mode via a dict
-      - beta schedule creation via helper
-      - avoids constructing big temporaries in the Fourier constraint by updating only outside beamstop
-      - robust "best guesses" accumulation (no undefined Best_guess)
+    Parameters
+    ----------
+    diffract : array_like (2D)
+        Far-field amplitude target (same shape as mask).
+    mask : array_like (2D)
+        Support mask in real space (0/1). Same shape as diffract.
+    mode : str
+        Algorithm: ER, SF, HAPRE, RAAR, HIOs, HIO, OSS, CHIO, HPR.
+    Nit : int
+        Number of iterations.
+    beta_zero : float
+        Base beta parameter.
+    beta_mode : str or np.ndarray
+        Beta schedule name or explicit array of length Nit.
+    gamma : array_like (2D)
+        Initial mutual coherence function (centered, same shape as diffract).
+        Required; normalized to sum 1.
+    RL_freq : int
+        Update gamma with Richardson–Lucy every RL_freq iterations.
+    RL_it : int
+        Number of Richardson–Lucy iterations per update.
+    Phase : array_like (2D complex) or None
+        Initial Fourier-domain guess. If None, random phases with the measured
+        amplitude are used.
+    seed : bool
+        If True, uses fixed RNG seed for reproducibility.
+    plot_every : int
+        Interval for computing/storing diffraction error.
+    bsmask : array_like (2D) or None
+        Beamstop / floating pixel mask in Fourier domain. 1 = unconstrained pixel.
+    real_object : bool
+        Not used, kept for API compatibility.
+    average_img : int
+        Number of best guesses near the end to average.
+    Fourier_last : bool
+        Apply Fourier constraint one last time before returning.
 
     Returns
     -------
     guess : np.ndarray (2D complex)
+        Final reconstructed Fourier-domain field (ifftshifted back).
     Error_diffr_list : list
+        Sampled diffraction errors over iterations in dB.
     Error_supp_list : list
-    gamma : np.ndarray (2D complex or real, depending on your RL implementation)
+        Support errors (kept for compatibility; not filled).
+    gamma : np.ndarray (2D complex)
+        Retrieved mutual coherence function (ifftshifted back).
     ------
     author: CK 2026
     """
@@ -1641,7 +1702,8 @@ def W(npx, npy, alpha=0.1):
 
 def Error_diffract_cp(guess, diffract):
     """
-    Error on the diffraction attern of retrieved data.
+    Error on the diffraction pattern of retrieved data in dB,
+    10*log10( sum|diffract - guess|^2 / sum|diffract|^2 ).
     INPUT:  guess, diffract: retrieved and experimental diffraction patterns
 
     OUTPUT: Error between the two

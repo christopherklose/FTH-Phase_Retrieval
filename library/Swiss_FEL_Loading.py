@@ -85,7 +85,7 @@ def list_data_filenames(run_nr,BASEFOLDER,  search_key="*"):
     =========
     run_nr : int or str
         identifier of experiment run
-    BASEFOLDER : int
+    BASEFOLDER : str
         general beamtime folder
     search_key : str
         searches files for additional key. Default: all files
@@ -124,10 +124,10 @@ def list_acquisition_filenames(run_nr,BASEFOLDER, acq_nrs=None, ONLY_CAMERA=Fals
     =========
     run_nr : int 
         identifier of experiment run
-    BASEFOLDER : int
+    BASEFOLDER : str
         general beamtime folder
     acq_nrs : iterable list, array
-        searches files for additional key. Default: all files (None)
+        acquisition numbers to load. Default: all acquisitions (None)
     ONLY_CAMERA : bool
         exports only camera acquisition files names if True or all related
         h5 files if False
@@ -347,7 +347,7 @@ def load_processing(im_id, BASEFOLDER, loadmode="avg", binning=1, crop=0, nr_job
     im_id : int or list of int
         image data identifier number, if list images of multiple scans are 
         going to be averaged
-    BASEFOLDER : int
+    BASEFOLDER : str
         general beamtime folder
     loadmode : str
         "avg": return average over all frames of a given filenames
@@ -355,14 +355,16 @@ def load_processing(im_id, BASEFOLDER, loadmode="avg", binning=1, crop=0, nr_job
     binning : int
         additional binning of pixels in image
     crop : int
-        crops image arrays according to array[:crop, :crop]
-    n_jobs : int
+        crops images symmtrically by "crop" number of pixels
+    nr_jobs : int
         number of jobs, i.e., available cpu threads
 
     Output
     ======
-    files : list
-        list of searched filenames
+    image : array
+        average over all images
+    images : array
+        loaded images (average per scan if im_id is a list)
     ======
     author: ck 2024
     """
@@ -421,9 +423,9 @@ def load_processing_frames(fnames, loadmode="avg", crop=0, frame_index_list=None
         Force square shaped arrays
     binning : int
         pixel binning
-    n_jobs : int
+    nr_jobs : int
         number of jobs, i.e., available cpu threads
-        
+
     Output
     ======
     image : array
@@ -457,7 +459,7 @@ def load_readback(run_nr, BASEFOLDER):
     =========
     run_nr : int or str
         identifier of experiment run
-    BASEFOLDER : int
+    BASEFOLDER : str
         general beamtime folder
 
     Output
@@ -493,7 +495,7 @@ def drop_faulty_acquisitions(run_nr, BASEFOLDER):
     =========
     run_nr : int or str
         identifier of experiment run
-    BASEFOLDER : int
+    BASEFOLDER : str
         general beamtime folder
 
     Output

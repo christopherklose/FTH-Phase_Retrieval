@@ -129,13 +129,13 @@ def photon_energy_wavelength(value, input_unit = 'eV'):
     =========
     value : scalar
         input value either in eV or nm
-    unit : string
+    input_unit : string
         Select input unit. Currently either nm or eV is supported
-        
+
     Output
     ======
     lambda_Xray or energy_Xray: scalar
-        Converted unit  
+        wavelength in m (input in eV) or photon energy in eV (input in nm)
     ======
     author: ck 2023
     '''    
@@ -244,16 +244,16 @@ def fill_infs_nans(array,fill_value = 0):
     Parameter
     =========
     array : numpy array
-        array with non square shape in last two dimensions
+        array that may contain infs and nans (modified in place)
     fill_value : scalar
         fill infs and nans with this value
-        
+
     Output
     ======
     array : numpy array
-        array with filled entries 
+        array with filled entries
     nans_array : numpy array
-        all of these elements
+        bool mask of the replaced inf and nan elements
     ======
     author: ck 2023
     '''
@@ -442,8 +442,8 @@ def quick_plot(data,**kwargs):
 
 def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
     """
-    Expects an array of shape (X, 3), each row being HLS colours.
-    Returns an array of same size, each row being RGB colours.
+    Expects an array of shape (Y, X, 3), the last axis being HLS colours.
+    Returns an array of same size, the last axis being RGB colours.
     Like `colorsys` python module, all values are between 0 and 1.
 
     NOTE: like `colorsys`, this uses HLS rather than the more usual HSL
