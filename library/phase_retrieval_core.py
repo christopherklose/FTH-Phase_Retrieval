@@ -899,10 +899,11 @@ def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
     ax : matplotlib.axes.Axes
     """
 
-    # Initialize default algorithm lists if it is not provided
-    default_recipe = default_phase_retrieval_recipe()
-    for key in ["algorithm_list_full_coherence", "algorithm_list_partial_coherence"]:
-        phase_retrieval_recipe.setdefault(key, default_recipe[key])
+    # Recipe: defaults + overrides (local copy, the caller's dict is not modified)
+    recipe = default_phase_retrieval_recipe()
+    if phase_retrieval_recipe:
+        recipe.update(phase_retrieval_recipe)
+    phase_retrieval_recipe = recipe
 
     if ax is None:
         fig, ax = plt.subplots()

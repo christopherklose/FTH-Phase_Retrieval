@@ -20,6 +20,7 @@ import numpy as np
 mnemonics = dict()
 mnemonics["measurement"] = "measurement"
 mnemonics["ccd"] = "measurement/ccd2"
+mnemonics["images"] = "ccd2"  # key inside mnemonics["measurement"], used by load_images
 mnemonics["pre_scan_snapshot"] = "measurement/pre_scan_snapshot"
 mnemonics["energy"] = "measurement/pre_scan_snapshot/energy"
 mnemonics["helicity"] = "measurement/pre_scan_snapshot/helicity"

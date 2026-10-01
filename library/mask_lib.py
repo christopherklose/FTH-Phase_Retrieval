@@ -14,6 +14,7 @@ from dipy.segment.mask import median_otsu
 
 # skimage
 import skimage.morphology
+from skimage.draw import ellipse
 
 
 def shift_image(image, shift, interpolation=True):
@@ -348,7 +349,15 @@ def create_ellipse_supportmask(support_coordinates, shape):
             support_coordinates[i][2],
             support_coordinates[i][3],
         )
-        yy, xx = ellipse(center[1], center[0], height / 2, width / 2, rotation=-angle)
+        # angle from InteractiveEllipseCoordinates is in degrees, skimage needs radians
+        yy, xx = ellipse(
+            center[1],
+            center[0],
+            height / 2,
+            width / 2,
+            shape=shape,
+            rotation=-np.deg2rad(angle),
+        )
         supportmask[yy, xx] = 1
 
     return supportmask

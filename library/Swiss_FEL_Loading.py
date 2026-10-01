@@ -271,9 +271,9 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0, square_shape = True, b
                 )
 
             if square_shape is True:
-                image_stack = helper.make_square_shape(image_stack.astype("float32"))
+                image = helper.make_square_shape(image.astype("float32"))
             if binning > 1:
-                image_stack = helper.binning(image_stack, binning)
+                image = helper.binning(image, binning)
             
             return image
 
@@ -371,21 +371,21 @@ def load_processing(im_id, BASEFOLDER, loadmode="avg", binning=1, crop=0, nr_job
     images = []
     if isinstance(im_id, list):
         for idx in im_id:
-            ids = sfl.list_acquisition_filenames(
+            ids = list_acquisition_filenames(
                 int(idx), BASEFOLDER, acq_nrs=None, ONLY_CAMERA=True
             )
-            image, _ = sfl.load_processing_frames(
-                ids, loadmode=loadmode, crop=crop, nr_jobs=NR_JOBS
+            image, _ = load_processing_frames(
+                ids, loadmode=loadmode, crop=crop, nr_jobs=nr_jobs
             )
             images.append(image)
         images = np.stack(images)
         image = np.mean(images, axis=0)
     else:
-        ids = sfl.list_acquisition_filenames(
+        ids = list_acquisition_filenames(
             im_id, BASEFOLDER, acq_nrs=None, ONLY_CAMERA=True
         )
-        image, _ = sfl.load_processing_frames(
-            ids, loadmode=loadmode, crop=crop, nr_jobs=NR_JOBS
+        image, _ = load_processing_frames(
+            ids, loadmode=loadmode, crop=crop, nr_jobs=nr_jobs
         )
         images = image.copy()
 

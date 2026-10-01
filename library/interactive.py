@@ -1355,6 +1355,10 @@ def focusCDI(pos,neg, roi, mask=1,phase=0, prop_dist=0,dx=0, dy=0, scale=(0,100)
     -------
     author: RB 2020
     '''
+    # Scalar mask (default) means: use the whole image
+    if np.isscalar(mask):
+        mask = np.ones(np.shape(pos))
+
     style = {'description_width': 'initial'}
     fig, axs = plt.subplots(2,2, figsize=(6,6))
     def p(x, y, fx, fy):

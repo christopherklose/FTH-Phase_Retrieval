@@ -389,7 +389,7 @@ def create_gif(image_filenames, output_gif,fps = 1,loop = 0):
                 for filename in sorted(os.listdir(path)):
                     if filename.endswith(".png") or filename.endswith(".jpg"):
                         filepath = os.path.join(path, filename)
-                        with Image(filename=path) as frame:
+                        with Image(filename=filepath) as frame:
                             img.sequence.append(frame)
             else:
                 print(f"{path} does not exist or is neither a file nor a directory.")

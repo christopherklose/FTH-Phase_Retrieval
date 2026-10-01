@@ -1503,9 +1503,9 @@ def process_cluster(
 
             if len(tmp_assignment) > 1:
                 # Calculate Linkage
-                tlinkage, dist_metric = create_linkage(
+                tlinkage, dist_metric = create_linkage_fast(
                     cluster_idx,
-                    corr_array,
+                    tmp_corr_small,
                     linkage_method=linkage_method,
                     metric=metric,
                     order=order,
@@ -1904,13 +1904,17 @@ def createHDF5(dict0, filename, extension=".hdf5", f=None):
 
 def read_hdf5(filename, extension=".hdf5", print_option=True):
 
-    f = h5py.File(filename + extension, "r")
-    dict_output = readHDF5(f, print_option=print_option, extension=extension)
+    with h5py.File(filename + extension, "r") as f:
+        dict_output = readHDF5(f, print_option=print_option, extension=extension)
 
     return dict_output
 
 
-def readHDF5(f, print_option=True, extension=".hdf5", dict_output={}):
+def readHDF5(f, print_option=True, extension=".hdf5", dict_output=None):
+
+    # New dict for every call (a mutable default would be shared between calls)
+    if dict_output is None:
+        dict_output = {}
 
     for i in f.keys():
 
