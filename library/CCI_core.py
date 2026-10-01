@@ -295,7 +295,7 @@ def image_registration(
         # Calculate Shift
         if roi is None:
             shift, error, diffphase = phase_cross_correlation(
-                image_background, image_unproccessed, upsample_factor=100
+                image_unproccessed, image_background, upsample_factor=100
             )
         else:
             roi_s = np.s_[roi[2] : roi[3], roi[0] : roi[1]]
