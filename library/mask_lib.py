@@ -5,6 +5,9 @@ from matplotlib.path import Path
 # scipy
 import scipy as sp
 from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import fourier_shift
+from scipy.ndimage import shift as scipy_shift
+from scipy.fft import fft2, ifft2
 
 # dipy
 from dipy.segment.mask import median_otsu
@@ -12,8 +15,38 @@ from dipy.segment.mask import median_otsu
 # skimage
 import skimage.morphology
 
-# Is there a GPU?
-import CCI_core as cci
+
+def shift_image(image, shift, interpolation=True):
+    """
+    Shifts image with sub-pixel precission in Fourier space
+
+    Parameters
+    ----------
+    image: array
+        Moving image, will be shifted by shift vector
+    shift: vector
+        x and y translation in px
+
+    Returns
+    -------
+    image_shifted: array
+        Shifted image
+    -------
+    author: CK 2023
+    """
+
+    if np.sum(np.abs(np.array(shift))) > 1e-12:
+        # Shift Image
+        if interpolation is True:
+            shifted_image = scipy_shift(image, shift, mode="reflect")
+        else:
+            shifted_image = fourier_shift(fft2(image), shift)
+            shifted_image = ifft2(shifted_image)
+
+        return shifted_image
+    else:
+        return image
+
 
 #Draw circle mask
 def circle_mask(shape,center,radius,sigma=None):
@@ -209,13 +242,13 @@ def auto_shift_mask(
     if crop is not None:
         tmask, timage = mask[crop:-crop, crop:-crop], image[crop:-crop, crop:-crop]
     else:
-        tmask, timage = mask.copy(), timage.copy()
+        tmask, timage = mask.copy(), image.copy()
 
     # Loop over all combinations of shifts
     for i, y in enumerate(yshift):
         for j, x in enumerate(xshift):
             # Shift mask to new position
-            mask_shift = cci.shift_image(tmask, [y, x])
+            mask_shift = shift_image(tmask, [y, x])
 
             # Calculate overlap
             overlap[i, j] = np.sum(mask_shift * timage)
@@ -237,14 +270,14 @@ def auto_shift_mask(
         )
 
     # Output
-    optimized_shift = (yshift[idx[0]], yshift[idx[1]])
+    optimized_shift = (yshift[idx[0]], xshift[idx[1]])
     print(
         "Best mask overlap for shift: [%.2f,%.2f]"
         % (optimized_shift[0], optimized_shift[1])
     )
 
     # Shift
-    mask_shifted = cci.shift_image(mask, optimized_shift)
+    mask_shifted = shift_image(mask, optimized_shift)
 
     # Binarize mask (necessary for sub-px shift)
     mask_shifted[mask_shifted > 0.5] = 1
