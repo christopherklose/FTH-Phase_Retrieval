@@ -1,5 +1,6 @@
 """
-Python library for CCI analysis using only CPU
+Python library for CCI analysis. Uses the GPU (CuPy) if available, otherwise the CPU.
+Set the environment variable FTH_CDI_FORCE_CPU=1 to force the CPU.
 
 2022-26
 @authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
@@ -52,42 +53,116 @@ from matplotlib.colors import LinearSegmentedColormap
 import mask_lib
 
 # ======================
+# GPU handling
+# ======================
+import logging
+
+log = logging.getLogger(__name__)
+
+try:
+    import cupy as cp
+
+    GPU = cp.is_available()
+except ImportError:
+    log.warning(
+        "Could not import cupy module (is it installed?). "
+        "Proceeding with CPU support only."
+    )
+    GPU = False
+except Exception as ex:
+    log.warning(
+        f"Error determining GPU availability: {ex}. "
+        "Proceeding with CPU support only."
+    )
+    GPU = False
+
+# Force CPU, e.g., to compare results of both backends
+if os.environ.get("FTH_CDI_FORCE_CPU", "0") == "1":
+    GPU = False
+
+if GPU:
+    log.info("CUDA GPU available.")
+    import cupy as xp
+    from cupyx.scipy.fft import fft2, ifft2
+    from cupyx.scipy.ndimage import shift as xp_shift
+    from cupyx.scipy.ndimage import fourier_shift as xp_fourier_shift
+else:
+    import numpy as xp
+    import scipy.fft as fft
+    from scipy.ndimage import shift as xp_shift
+    from scipy.ndimage import fourier_shift as xp_fourier_shift
+
+    # Change number of workers for fft
+    def fft2(array, **kwargs):
+        return fft.fft2(array, workers=os.cpu_count(), **kwargs)
+
+    def ifft2(array, **kwargs):
+        return fft.ifft2(array, workers=os.cpu_count(), **kwargs)
+
+
+def to_numpy(array):
+    """
+    Convert xp array to NumPy safely (no-op for NumPy arrays).
+    """
+    if GPU and isinstance(array, xp.ndarray):
+        return array.get()
+    return array
+
+
+# ======================
 # Arrays
 # ======================
 
 
-def shift_image(image, shift, interpolation=True):
+def shift_image(image, shift, interpolation=True, out_dtype="numpy"):
     """
     Shifts image with sub-pixel precission in Fourier space
 
 
     Parameters
     ----------
-    image: array
+    image: numpy/cupy array
         Moving image, will be shifted by shift vector
 
     shift: vector
         x and y translation in px
 
+    interpolation: bool
+        True: spline interpolation, False: shift in Fourier space
+
+    out_dtype : string
+        output data as numpy or cupy array ("cupy" keeps the data on the GPU)
+
     Returns
     -------
     image_shifted: cupy/numpy array
-        Shifted image
+        Shifted image, real for real input and complex for complex input
     -------
     author: CK 2023
     """
 
-    if np.sum(np.abs(np.array(shift))) > 1e-12:
-        # Shift Image
-        if interpolation is True:
-            shifted_image = scipy_shift(image, shift, mode="reflect")
-        else:
-            shifted_image = fourier_shift(scp.fft.fft2(image), shift)
-            shifted_image = scp.fft.ifft2(shifted_image)
+    shift = np.asarray(to_numpy(shift), dtype=float)
 
-        return shifted_image
+    if np.sum(np.abs(shift)) > 1e-12:
+        # Shift Image
+        image = xp.asarray(image)
+
+        if interpolation is True:
+            shifted_image = xp_shift(image, shift, mode="reflect")
+        else:
+            shifted_image = xp_fourier_shift(fft2(image), shift)
+            shifted_image = ifft2(shifted_image)
+
+            # Real input gives real output
+            if not xp.iscomplexobj(image):
+                shifted_image = shifted_image.real
     else:
-        return image
+        shifted_image = image
+
+    if out_dtype == "numpy":
+        shifted_image = to_numpy(shifted_image)
+
+    return shifted_image
 
 
 def shift_image_stack(image_stack, shift, interpolation=True, chunk_sz=None):
@@ -109,7 +184,8 @@ def shift_image_stack(image_stack, shift, interpolation=True, chunk_sz=None):
     Returns
     -------
     shifted_image_stack: array
-        Shifted image stack
+        Shifted image stack. A 3d stack is modified in place, i.e., the input
+        array is overwritten (avoids doubling the memory for large stacks).
     -------
     author: CK 2023/24
     """
@@ -118,39 +194,39 @@ def shift_image_stack(image_stack, shift, interpolation=True, chunk_sz=None):
     if np.all(shift == np.zeros(shift.shape)) == False:
         if image_stack.ndim == 2:
             print("Warning: This is only a single 2d image!")
-            image_stack = shift_image(image_stack, shift)
+            image_stack = shift_image(image_stack, shift, interpolation=interpolation)
         elif image_stack.ndim == 3:
+            # Without chunking, process the whole stack as one chunk
             if chunk_sz is None:
-                # Shift Image
-                for frame in tqdm(range(image_stack.shape[0])):
-                    image_stack[frame] = shift_image(image_stack[frame], shift[frame])
-            else:
-                # Limits for Chunk Image stacks
-                chunk_it = np.append(
-                    np.arange(
-                        0, np.ceil(image_stack.shape[0] / chunk_sz) * chunk_sz, chunk_sz
-                    ),
-                    image_stack.shape[0],
-                ).astype(int)
+                chunk_sz = image_stack.shape[0]
 
-                # Vary chunk
-                print("Shifting images...")
-                for ii in tqdm(range(len(chunk_it) - 1), desc="Chunk"):
-                    # Chunk data and load into gpu
-                    tmp_stack = image_stack[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    shift_stack = shift[chunk_it[ii] : chunk_it[ii + 1]].copy()
+            # Limits for Chunk Image stacks
+            chunk_it = np.append(
+                np.arange(
+                    0, np.ceil(image_stack.shape[0] / chunk_sz) * chunk_sz, chunk_sz
+                ),
+                image_stack.shape[0],
+            ).astype(int)
 
-                    ##Vary frames
-                    for frames in tqdm(range(tmp_stack.shape[0]), desc="Frame"):
-                        # Calc correction
-                        tmp_stack[frames] = shift_image(
-                            tmp_stack[frames],
-                            shift_stack[frames, :],
-                            interpolation=interpolation,
-                        )
+            # Vary chunk
+            print("Shifting images...")
+            for ii in tqdm(range(len(chunk_it) - 1), desc="Chunk"):
+                # Chunk data and load into gpu
+                tmp_stack = xp.asarray(image_stack[chunk_it[ii] : chunk_it[ii + 1]])
+                shift_stack = shift[chunk_it[ii] : chunk_it[ii + 1]]
 
-                    # Assign to images
-                    image_stack[chunk_it[ii] : chunk_it[ii + 1]] = tmp_stack
+                ##Vary frames
+                for frames in tqdm(range(tmp_stack.shape[0]), desc="Frame"):
+                    # Calc correction
+                    tmp_stack[frames] = shift_image(
+                        tmp_stack[frames],
+                        shift_stack[frames, :],
+                        interpolation=interpolation,
+                        out_dtype="cupy",
+                    )
+
+                # Assign to images (in place)
+                image_stack[chunk_it[ii] : chunk_it[ii + 1]] = to_numpy(tmp_stack)
 
     elif np.all(shift == np.zeros(shift.shape)) == True:
         print("Shift is all-zero. Images are not going to be shifted!")
@@ -201,20 +277,22 @@ def image_registration(
     author: CK 2022/23
     """
 
+    # skimage and dipy run on the CPU only
+    image_unproccessed = to_numpy(image_unproccessed)
+    image_background = to_numpy(image_background)
+
     # Different method to calc image registration
     if method == "phase_cross_correlation":
         # Calculate Shift
-        if roi == None:
+        if roi is None:
             shift, error, diffphase = phase_cross_correlation(
                 image_background, image_unproccessed, upsample_factor=100
             )
         else:
+            roi_s = np.s_[roi[2] : roi[3], roi[0] : roi[1]]
             shift, error, diffphase = phase_cross_correlation(
-                image_background[
-                    roi[2] : roi[3],
-                    image_unproccessed[roi[2] : roi[3], roi[0] : roi[1]],
-                    roi[0] : roi[1],
-                ],
+                image_background[roi_s],
+                image_unproccessed[roi_s],
                 upsample_factor=100,
             )
 
@@ -310,8 +388,13 @@ def dyn_factor(
         crop_s = np.s_[crop:-crop, crop:-crop]
 
     if method == "scalarproduct":
-        factor = np.sum(image[crop_s] * image_ref[crop_s]) / np.sum(
-            image_ref[crop_s] * image_ref[crop_s]
+        # Load into gpu
+        image = xp.asarray(image)
+        image_ref = xp.asarray(image_ref)
+
+        factor = float(
+            xp.sum(image[crop_s] * image_ref[crop_s])
+            / xp.sum(image_ref[crop_s] * image_ref[crop_s])
         )
         offset = 0
 
@@ -319,12 +402,13 @@ def dyn_factor(
             print(f"Intensity correction factor:", factor)
 
     elif method == "correlation":
-        # Create y, x data
-        xdata = np.concatenate(image_ref[crop_s])
-        ydata = np.concatenate(image[crop_s])
+        # Create y, x data (curve_fit runs on the CPU)
+        xdata = np.concatenate(to_numpy(image_ref[crop_s]))
+        ydata = np.concatenate(to_numpy(image[crop_s]))
 
-        # Ignore all x,y = 0 values, e.g., if a mask is used
-        ignore = np.logical_or((xdata == 0), (ydata == 0))
+        # Ignore all x,y ~ 0 values, e.g., if a mask is used (masked pixel
+        # are only close to 0 after a sub-pixel shift)
+        ignore = np.logical_or((np.abs(xdata) <= 1e-5), (np.abs(ydata) <= 1e-5))
         xdata = xdata[np.argwhere(ignore == False)]
         ydata = ydata[np.argwhere(ignore == False)]
 
@@ -375,8 +459,13 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop=0
 
     Returns
     -------
-    shifted_image_stack: array
-        Shifted image stack
+    images: array
+        Difference image stack. A 3d stack is modified in place, i.e., the
+        input array is overwritten (avoids doubling the memory for large stacks).
+    factor: array
+        Intensity correction factor of each frame
+    offset: array
+        Intensity offset of each frame
     -------
     author: CK 2023
     """
@@ -398,117 +487,49 @@ def calc_diff_stack(images, topos, chunk_sz=None, method="scalarproduct", crop=0
         factor = np.zeros(images.shape[0])
         offset = np.zeros(images.shape[0])
 
-        if topos.ndim == 3:
-            if chunk_sz == None:
-                # Loop over frames
-                for frames in tqdm(range(images.shape[0]), desc="Frames"):
-                    factor[frames], offset[frames] = dyn_factor(
-                        images[frames],
-                        topos[frames],
-                        method=method,
-                        crop=crop,
-                        verbose=False,
-                        plot=False,
-                    )
-                    images[frames] = (
-                        images[frames] / factor[frames] - topos[frames] - offset[frames]
-                    )
+        # Without chunking, process the whole stack as one chunk
+        if chunk_sz is None:
+            chunk_sz = images.shape[0]
 
-            else:
-                # Limits for Chunk Image stacks
-                chunk_it = np.append(
-                    np.arange(
-                        0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz
-                    ),
-                    images.shape[0],
-                ).astype(int)
+        # Limits for Chunk Image stacks
+        chunk_it = np.append(
+            np.arange(0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz),
+            images.shape[0],
+        ).astype(int)
 
-                # Vary chunk
-                # print("Shifting images...")
-                for ii in tqdm(range(len(chunk_it) - 1), desc="Chunk"):
-                    # Chunk data
-                    image_stack = images[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    factor_stack = factor[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    offset_stack = offset[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    topo_stack = topos[chunk_it[ii] : chunk_it[ii + 1]].copy()
+        # A single 2d topo is used for all frames
+        if topos.ndim == 2:
+            topo_single = xp.asarray(topos)
 
-                    # Vary frames
-                    for frames in tqdm(range(image_stack.shape[0]), desc="Frames"):
-                        # Calc difference holo
-                        factor_stack[frames], offset_stack[frames] = dyn_factor(
-                            image_stack[frames],
-                            topo_stack[frames],
-                            method=method,
-                            crop=crop,
-                            verbose=False,
-                            plot=False,
-                        )
-                        image_stack[frames] = (
-                            image_stack[frames] / factor_stack[frames]
-                            - topo_stack[frames]
-                            - offset_stack[frames]
-                        )
+        # Vary chunk
+        for ii in tqdm(range(len(chunk_it) - 1), desc="Chunk"):
+            # Chunk data and load into gpu
+            chunk = slice(chunk_it[ii], chunk_it[ii + 1])
+            image_stack = xp.asarray(images[chunk])
+            if topos.ndim == 3:
+                topo_stack = xp.asarray(topos[chunk])
 
-                    # Assign to images
-                    factor[chunk_it[ii] : chunk_it[ii + 1]] = factor_stack
-                    images[chunk_it[ii] : chunk_it[ii + 1]] = image_stack
-                    offset[chunk_it[ii] : chunk_it[ii + 1]] = offset_stack
+            # Vary frames
+            for frames in tqdm(range(image_stack.shape[0]), desc="Frames"):
+                topo = topo_stack[frames] if topos.ndim == 3 else topo_single
 
-        elif topos.ndim == 2:
-            if chunk_sz == None:
-                # Loop over frames
-                for frames in tqdm(range(images.shape[0])):
-                    factor[frames], offset[frames] = dyn_factor(
-                        images[frames],
-                        topos,
-                        method=method,
-                        crop=crop,
-                        verbose=False,
-                        plot=False,
-                    )
-                    images[frames] = (
-                        images[frames] / factor[frames] - topos - offset[frames]
-                    )
+                # Calc difference holo
+                factor_frame, offset_frame = dyn_factor(
+                    image_stack[frames],
+                    topo,
+                    method=method,
+                    crop=crop,
+                    verbose=False,
+                    plot=False,
+                )
+                image_stack[frames] = (
+                    image_stack[frames] / factor_frame - topo - offset_frame
+                )
+                factor[chunk_it[ii] + frames] = factor_frame
+                offset[chunk_it[ii] + frames] = offset_frame
 
-            else:
-                # Limits for Chunk Image stacks
-                chunk_it = np.append(
-                    np.arange(
-                        0, np.ceil(images.shape[0] / chunk_sz) * chunk_sz, chunk_sz
-                    ),
-                    images.shape[0],
-                ).astype(int)
-
-                # Vary chunk
-                # print("Shifting images...")
-                for ii in tqdm(range(len(chunk_it) - 1)):
-                    # Chunk data and load into gpu
-                    image_stack = images[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    factor_stack = factor[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    offset_stack = offset[chunk_it[ii] : chunk_it[ii + 1]].copy()
-                    topo_stack = topos.copy()
-
-                    # Vary frames
-                    for frames in tqdm(range(image_stack.shape[0])):
-                        # Calc difference holo
-                        factor_stack[frames], offset_stack[frames] = dyn_factor(
-                            image_stack[frames],
-                            topo_stack,
-                            method=method,
-                            crop=crop,
-                            verbose=False,
-                            plot=False,
-                        )
-                        image_stack[frames] = (
-                            image_stack[frames] / factor_stack[frames]
-                            - topo_stack
-                            - offset_stack[frames]
-                        )
-
-                    # Assign to images
-                    factor[chunk_it[ii] : chunk_it[ii + 1]] = factor_stack
-                    images[chunk_it[ii] : chunk_it[ii + 1]] = image_stack
-                    offset[chunk_it[ii] : chunk_it[ii + 1]] = offset_stack
+            # Assign to images (in place)
+            images[chunk] = to_numpy(image_stack)
 
     return images, factor, offset
 
@@ -524,9 +545,9 @@ def reconstruct(image):
     -------
     author: CK 2022
     """
-    return scp.fft.ifftshift(
-        scp.fft.ifft2(scp.fft.fftshift(image), workers=os.cpu_count())
-    )
+    image = xp.asarray(image)
+    image = xp.fft.ifftshift(ifft2(xp.fft.fftshift(image)))
+    return to_numpy(image)
 
 
 def FFT(image):
@@ -535,9 +556,9 @@ def FFT(image):
     -------
     author: CK 2022
     """
-    return scp.fft.fftshift(
-        scp.fft.fft2(scp.fft.ifftshift(image), workers=os.cpu_count())
-    )
+    image = xp.asarray(image)
+    image = xp.fft.fftshift(fft2(xp.fft.ifftshift(image)))
+    return to_numpy(image)
 
 
 def propagate(holo, prop_l, experimental_setup, integer_wl_multiple=True):
@@ -757,12 +778,16 @@ def seg_statistics(holo, mask, NrStd=1, verbose=False):
     author: CK 2022
     """
 
+    # Load into gpu
+    holo = xp.asarray(holo)
+    mask = xp.asarray(mask)
+
     temp = holo[mask == 0]
 
-    MEAN = np.mean(temp)
-    STD = np.std(temp)
+    MEAN = float(xp.nanmean(temp))
+    STD = float(xp.nanstd(temp))
 
-    Statistics_mask = np.abs(holo) >= MEAN + NrStd * STD
+    Statistics_mask = to_numpy(xp.abs(holo) >= MEAN + NrStd * STD)
 
     if verbose is True:
         print(f"Mean of noise distribution: %.2f" % MEAN)
@@ -838,7 +863,7 @@ def correlation_map_masks(
 
     Returns
     -------
-    corr_map : numpy array
+    corr_map : numpy array (cupy array if return_numpy is False and a GPU is used)
         cross-correlation array
     -------
     author: CK 2026
@@ -847,8 +872,8 @@ def correlation_map_masks(
     # -------------------------
     # Flatten
     # -------------------------
-    images_gpu = np.asarray(image_stack, dtype=image_dtype)  # (N,H,W)
-    masks_gpu_bool = np.asarray(mask_stack, dtype=np.bool_)  # (N,H,W)
+    images_gpu = xp.asarray(image_stack, dtype=image_dtype)  # (N,H,W)
+    masks_gpu_bool = xp.asarray(mask_stack, dtype=xp.bool_)  # (N,H,W)
 
     num_images, height, width = images_gpu.shape
     num_pixels = height * width
@@ -911,16 +936,19 @@ def correlation_map_masks(
         - sum_imgi2_mi_times_mj.T
     )  # (N,N)
 
-    normalization_factor = np.sqrt(
-        np.maximum(denominator_i_all_pairs * denominator_j_all_pairs, 0.0)
+    normalization_factor = xp.sqrt(
+        xp.maximum(denominator_i_all_pairs * denominator_j_all_pairs, 0.0)
     )
 
     correlation_matrix = numerator_all_pairs / (normalization_factor)
 
     # Optional: enforce perfect diagonal + symmetry
-    np.fill_diagonal(correlation_matrix, 1.0)
+    xp.fill_diagonal(correlation_matrix, 1.0)
     if symmetrize:
         correlation_matrix = 0.5 * (correlation_matrix + correlation_matrix.T)
+
+    if return_numpy:
+        correlation_matrix = to_numpy(correlation_matrix)
 
     return correlation_matrix
 
@@ -946,7 +974,7 @@ def correlation_map_masks_batched(
 
     Returns
     -------
-    corr_map : numpy array
+    corr_map : numpy array (cupy array if return_numpy is False and a GPU is used)
         cross-correlation array
     -------
     author: CK 2026
@@ -955,8 +983,8 @@ def correlation_map_masks_batched(
     # -------------------------
     # flatten
     # -------------------------
-    images_gpu = np.asarray(image_stack, dtype=image_dtype)  # (N,H,W)
-    masks_gpu_bool = np.asarray(mask_stack, dtype=np.bool_)  # (N,H,W)
+    images_gpu = xp.asarray(image_stack, dtype=image_dtype)  # (N,H,W)
+    masks_gpu_bool = xp.asarray(mask_stack, dtype=xp.bool_)  # (N,H,W)
 
     num_images, height, width = images_gpu.shape
     num_pixels = height * width
@@ -980,9 +1008,9 @@ def correlation_map_masks_batched(
     # Allocate output
     # -------------------------
     if return_numpy:
-        correlation_matrix_out = np.empty((num_images, num_images), dtype=np.float32)
+        correlation_matrix_out = xp.empty((num_images, num_images), dtype=np.float32)
     else:
-        correlation_matrix_out = np.empty((num_images, num_images), dtype=image_dtype)
+        correlation_matrix_out = xp.empty((num_images, num_images), dtype=image_dtype)
 
     # -------------------------
     # Process blocks of columns (j)
@@ -1047,14 +1075,14 @@ def correlation_map_masks_batched(
             - sum_imgj2_mj_times_mi.T
         )  # (N,B)
 
-        normalization_factor_block = np.sqrt(
-            np.maximum(denominator_i_block * denominator_j_block, 0.0)
+        normalization_factor_block = xp.sqrt(
+            xp.maximum(denominator_i_block * denominator_j_block, 0.0)
         )
         correlation_block = numerator_block / (normalization_factor_block)  # (N,B)
 
         # Set diagonal elements that fall inside this batch
         # diagonal entries correspond to (i=j) for j in [batch_start, batch_end)
-        diag_indices_global = np.arange(batch_start, batch_end)  # (B,)
+        diag_indices_global = xp.arange(batch_start, batch_end)  # (B,)
         diag_rows_in_block = diag_indices_global  # row indices in (N,B)
         diag_cols_in_block = diag_indices_global - batch_start  # col indices in (N,B)
         correlation_block[diag_rows_in_block, diag_cols_in_block] = 1.0
@@ -1067,7 +1095,10 @@ def correlation_map_masks_batched(
         correlation_matrix_out = 0.5 * (
             correlation_matrix_out + correlation_matrix_out.T
         )
-        np.fill_diagonal(correlation_matrix_out, 1.0)
+        xp.fill_diagonal(correlation_matrix_out, 1.0)
+
+    if return_numpy:
+        correlation_matrix_out = to_numpy(correlation_matrix_out)
 
     return correlation_matrix_out
 
@@ -1088,38 +1119,42 @@ def correlation_map_fast(in_array):
     author: CK 2022
     """
 
+    # Load into gpu
+    in_array = xp.asarray(in_array)
+
     # If dimension is 3d
     if len(in_array.shape) == 3:
         in_array = in_array.reshape(
             in_array.shape[0], in_array.shape[1] * in_array.shape[2]
         )
 
-    # predefine array
-    corr_map = np.zeros((in_array.shape[0], in_array.shape[0]))
-
     # Pure Multiplication
-    corr_map_nonorm = np.dot(in_array, in_array.T) / in_array.shape[1]  # Averaged value
+    corr_map_nonorm = xp.dot(in_array, in_array.T) / in_array.shape[1]  # Averaged value
 
     # Calc correlation function (Sutton)
     # Normalization
-    mean_counts = np.mean(in_array, axis=1)
+    mean_counts = xp.mean(in_array, axis=1)
     mean_counts[mean_counts <= 0] = 1  # Correction if average is 0 or below 0
     mean_counts = mean_counts.reshape(1, mean_counts.shape[0])
-    norm = np.dot(mean_counts.T, mean_counts)  # (nxn) Normalization array
+    norm = xp.dot(mean_counts.T, mean_counts)  # (nxn) Normalization array
 
     # Calc Corr
     corr_map_sutton = corr_map_nonorm / norm
 
     # Calc correlation function (Pearson)
     # Normalization
-    cross_corr = np.diag(corr_map_nonorm)
+    cross_corr = xp.diag(corr_map_nonorm)
     cross_corr = cross_corr.reshape(1, cross_corr.shape[0])
-    norm = np.sqrt(np.dot(cross_corr.T, cross_corr))  # (nxn) Normalization array
+    norm = xp.sqrt(xp.dot(cross_corr.T, cross_corr))  # (nxn) Normalization array
 
     # Calc corr
     corr_map_pearson = corr_map_nonorm / norm
 
-    return corr_map_nonorm, corr_map_pearson, corr_map_sutton
+    return (
+        to_numpy(corr_map_nonorm),
+        to_numpy(corr_map_pearson),
+        to_numpy(corr_map_sutton),
+    )
 
 
 # ===========================
@@ -1275,7 +1310,7 @@ def create_linkage_fast(
 
         # Corr map
         ax2 = fig.add_subplot(2, 2, 2, sharex=ax1, sharey=ax1)
-        vmi, vma = np.percentile(corr_array, [5, 95])
+        vmi, vma = np.percentile(corr_array[corr_array <= 1 - 1e-5], [5, 95])
         ax2.imshow(corr_array, vmin=vmi, vmax=vma, cmap=parula, aspect="auto")
         ax2.set_title("Correlation map")
         ax2.set_xlabel("Frame index k")
