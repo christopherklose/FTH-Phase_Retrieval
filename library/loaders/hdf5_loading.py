@@ -24,6 +24,28 @@ import numpy as np
 # Commonly used hdf5 entries. Facility and nexus file structure specific
 MNEMONICS = dict()
 
+# MAX IV, SoftiMAX
+MNEMONICS["MAXIV"] = {
+    # tree
+    "measurement": "measurement",
+    "pre_scan_snapshot": "measurement/pre_scan_snapshot",
+    "pre_scan": "snapshots/pre_scan",
+    "post_scan": "snapshots/post_scan",
+    
+    # Camera related
+    "ccd": "instrument/picam/data",
+    "exposure_time": "instrument/picam/exposure",
+    "pixel_format": "instrument/picam/frame_shape",
+    
+    # instruments
+    "diode": "measurement/aem_eb01_01_ch1",
+    
+    # snapshots
+    "energy": "measurement/pre_scan_snapshot/beamline_energy",
+    "det_dist": "snapshots/post_scan/detectorz",
+    "pre_energy": "snapshots/pre_scan/beamline_energy",
+}
+
 # MAXI chamber from MBI
 MNEMONICS["MAXI"] = {
     "measurement": "measurement",
@@ -58,25 +80,6 @@ MNEMONICS["PETRA"] = {
     "temperature": "/scan/data/cryoin4",
     "diode": "/scan/data/adc_beck_femto_diodemax",
     "magnet": "/scan/instrument/collection/m_caena",
-}
-
-# MAX IV, SoftiMAX
-MNEMONICS["MAXIV"] = {
-    # tree
-    "measurement": "measurement",
-    "pre_scan_snapshot": "measurement/pre_scan_snapshot",
-    "pre_scan": "snapshots/pre_scan",
-    "post_scan": "snapshots/post_scan",
-    # Camera related
-    "ccd": "instrument/picam/data",
-    "exposure_time": "instrument/picam/exposure",
-    "pixel_format": "instrument/picam/frame_shape",
-    # instruments
-    "diode": "measurement/aem_eb01_01_ch1",
-    # snapshots
-    "energy": "measurement/pre_scan_snapshot/beamline_energy",
-    "det_dist": "snapshots/post_scan/detectorz",
-    "pre_energy": "snapshots/pre_scan/beamline_energy",
 }
 
 ##########################################################################
