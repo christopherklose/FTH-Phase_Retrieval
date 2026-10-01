@@ -12,6 +12,7 @@ Riccardo Battistelli, Daniel Metternich, Michael Schneider, Lisa-Marie Kern, Kai
 """
 
 import logging
+
 log = logging.getLogger(__name__)
 
 import os
@@ -24,7 +25,6 @@ import matplotlib.pyplot as plt
 
 from scipy import stats
 
-    
 #############################################################
 #       GPU handling
 # ############################################################
@@ -50,7 +50,7 @@ except Exception as ex:
 # Use cupyx or scipy fft functions
 if GPU:
     import cupy as xp
-    from cupyx.scipy.fft import fft2, ifft2    
+    from cupyx.scipy.fft import fft2, ifft2
 else:
     import numpy as xp
     import scipy.fft as fft
@@ -59,7 +59,7 @@ else:
     # Change number of workers fot fft
     def fft2(array, **kwargs):
         return fft.fft2(array, workers=os.cpu_count(), **kwargs)
-    
+
     def ifft2(array, **kwargs):
         return fft.ifft2(array, workers=os.cpu_count(), **kwargs)
 
@@ -95,7 +95,7 @@ def default_phase_retrieval_recipe():
     ------
     author: CK 2026
     """
-    
+
     recipe = {
         "algorithm_list_full_coherence": ["HAPRE", "ER", "ER"],
         "number_iterations_full_coherence": [700, 50, 50],
@@ -109,9 +109,16 @@ def default_phase_retrieval_recipe():
         "partial_coherence_frequency_of_RL_cycles": 20,
     }
 
-    return recipe  
+    return recipe
 
-def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayLike, supportmask: ArrayLike, phase_retrieval_recipe=None):
+
+def phase_retrieval_algorithm(
+    pos: ArrayLike,
+    neg: ArrayLike,
+    mask_pixel: ArrayLike,
+    supportmask: ArrayLike,
+    phase_retrieval_recipe=None,
+):
     """
     Iterative phase retrieval (full coherence + optional partial coherence refinement)
     for positive/negative helicity holograms.
@@ -255,8 +262,9 @@ def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayL
     gamma_p = gamma_n = None
 
     # Initialize error lists
-    error_p_it_1 = error_p_it_2 = error_n_it_3 = error_p_pc_it_1 = error_p_pc_it_2 = error_n_pc_it_3 = []
-    
+    error_p_it_1, error_p_it_2, error_n_it_3 = [], [], []
+    error_p_pc_it_1, error_p_pc_it_2, error_n_pc_it_3 = [], [], []
+
     for step in range(0, len(recipe["number_iterations_full_coherence"]), 3):
         print("############ -   CDI Full Coherence")
 
@@ -312,7 +320,9 @@ def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayL
         )
 
         # Append errors to lists
-        error_p_it_1, error_p_it_2, error_n_it_3 = Error_diff_p, Error_diff_p2, Error_diff_n2
+        error_p_it_1.extend(Error_diff_p)
+        error_p_it_2.extend(Error_diff_p2)
+        error_n_it_3.extend(Error_diff_n2)
 
         print("--- %s seconds ---" % np.round((time.time() - start_time), 2))
         Startimage = retrieved_p.copy()
@@ -329,73 +339,69 @@ def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayL
             )
 
             # Partial coherence: positive (arctan)
-            retrieved_p_pc, Error_diff_p_pc, Error_supp, gamma_p = (
-                PhaseRtrv_with_RL(
-                    diffract=np.sqrt(pos_pc_input),
-                    mask=supportmask,
-                    mode=recipe["algorithm_list_partial_coherence"][step],
-                    beta_zero=0.5,
-                    Nit=recipe["number_iterations_partial_coherence"][step],
-                    beta_mode="arctan",
-                    gamma=Startgamma,
-                    RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
-                    RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
-                    plot_every=349,
-                    Phase=Startimage,
-                    seed=False,
-                    real_object=False,
-                    bsmask=np.zeros_like(bsmask_p),
-                    average_img=30,
-                    Fourier_last=True,
-                )
+            retrieved_p_pc, Error_diff_p_pc, Error_supp, gamma_p = PhaseRtrv_with_RL(
+                diffract=np.sqrt(pos_pc_input),
+                mask=supportmask,
+                mode=recipe["algorithm_list_partial_coherence"][step],
+                beta_zero=0.5,
+                Nit=recipe["number_iterations_partial_coherence"][step],
+                beta_mode="arctan",
+                gamma=Startgamma,
+                RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
+                RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
+                plot_every=349,
+                Phase=Startimage,
+                seed=False,
+                real_object=False,
+                bsmask=np.zeros_like(bsmask_p),
+                average_img=30,
+                Fourier_last=True,
             )
 
             # Partial coherence: positive (const)
-            retrieved_p_pc, Error_diff_p_pc2, Error_supp, gamma_p = (
-                PhaseRtrv_with_RL(
-                    diffract=np.sqrt(pos_pc_input),
-                    mask=supportmask,
-                    mode=recipe["algorithm_list_partial_coherence"][step + 1],
-                    beta_zero=0.5,
-                    Nit=recipe["number_iterations_partial_coherence"][step + 1],
-                    beta_mode="const",
-                    gamma=gamma_p,
-                    RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
-                    RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
-                    plot_every=24,
-                    Phase=retrieved_p_pc,
-                    seed=False,
-                    real_object=False,
-                    bsmask=np.zeros_like(bsmask_p),
-                    average_img=30,
-                    Fourier_last=True,
-                )
+            retrieved_p_pc, Error_diff_p_pc2, Error_supp, gamma_p = PhaseRtrv_with_RL(
+                diffract=np.sqrt(pos_pc_input),
+                mask=supportmask,
+                mode=recipe["algorithm_list_partial_coherence"][step + 1],
+                beta_zero=0.5,
+                Nit=recipe["number_iterations_partial_coherence"][step + 1],
+                beta_mode="const",
+                gamma=gamma_p,
+                RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
+                RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
+                plot_every=24,
+                Phase=retrieved_p_pc,
+                seed=False,
+                real_object=False,
+                bsmask=np.zeros_like(bsmask_p),
+                average_img=30,
+                Fourier_last=True,
             )
 
             # Partial coherence: negative (const) (use gamma_p as in original)
-            retrieved_n_pc, Error_diff_n_pc2, Error_supp, gamma_n = (
-                PhaseRtrv_with_RL(
-                    diffract=np.sqrt(neg_pc_input),
-                    mask=supportmask,
-                    mode=recipe["algorithm_list_partial_coherence"][step + 2],
-                    beta_zero=0.5,
-                    Nit=recipe["number_iterations_partial_coherence"][step + 2],
-                    beta_mode="const",
-                    gamma=gamma_p,
-                    RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
-                    RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
-                    plot_every=24,
-                    Phase=retrieved_p_pc * norm_factor,
-                    seed=False,
-                    real_object=False,
-                    bsmask=np.zeros_like(bsmask_n),
-                    average_img=30,
-                    Fourier_last=True,
-                )
+            retrieved_n_pc, Error_diff_n_pc2, Error_supp, gamma_n = PhaseRtrv_with_RL(
+                diffract=np.sqrt(neg_pc_input),
+                mask=supportmask,
+                mode=recipe["algorithm_list_partial_coherence"][step + 2],
+                beta_zero=0.5,
+                Nit=recipe["number_iterations_partial_coherence"][step + 2],
+                beta_mode="const",
+                gamma=gamma_p,
+                RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
+                RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
+                plot_every=24,
+                Phase=retrieved_p_pc * norm_factor,
+                seed=False,
+                real_object=False,
+                bsmask=np.zeros_like(bsmask_n),
+                average_img=30,
+                Fourier_last=True,
             )
 
             # Append errors to lists
-            error_p_pc_it_1, error_p_pc_it_2, error_n_pc_it_3 = Error_diff_p_pc, Error_diff_p_pc2, Error_diff_n_pc2
+            error_p_pc_it_1.extend(Error_diff_p_pc)
+            error_p_pc_it_2.extend(Error_diff_p_pc2)
+            error_n_pc_it_3.extend(Error_diff_n_pc2)
 
             print("--- %s seconds ---" % np.round((time.time() - start_time), 2))
 
@@ -409,18 +415,20 @@ def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayL
 
     # Create dictionary for error data
     error = {
-        "error_p_it_1": np.stack(error_p_it_1),
-        "error_p_it_2": np.stack(error_p_it_2),
-        "error_n_it_3": np.stack(error_n_it_3),
-        }
+        "error_p_it_1": np.asarray(error_p_it_1),
+        "error_p_it_2": np.asarray(error_p_it_2),
+        "error_n_it_3": np.asarray(error_n_it_3),
+    }
 
     if recipe["use_partial_coherence_algorithm"]:
-        error.update({
-        "error_p_pc_it_1": np.stack(error_p_pc_it_1),
-        "error_p_pc_it_2": np.stack(error_p_pc_it_2),
-        "error_n_pc_it_3": np.stack(error_n_pc_it_3),
-        })
-                     
+        error.update(
+            {
+                "error_p_pc_it_1": np.asarray(error_p_pc_it_1),
+                "error_p_pc_it_2": np.asarray(error_p_pc_it_2),
+                "error_n_pc_it_3": np.asarray(error_n_pc_it_3),
+            }
+        )
+
     print("Phase Retrieval Done!")
 
     return (
@@ -432,11 +440,16 @@ def phase_retrieval_algorithm(pos: ArrayLike, neg: ArrayLike, mask_pixel: ArrayL
         bsmask_n,
         gamma_p,
         gamma_n,
-        error
+        error,
     )
 
 
-def single_helicity_phase_retrieval_algorithm(pos: ArrayLike, mask_pixel: ArrayLike, supportmask: ArrayLike, phase_retrieval_recipe=None):
+def single_helicity_phase_retrieval_algorithm(
+    pos: ArrayLike,
+    mask_pixel: ArrayLike,
+    supportmask: ArrayLike,
+    phase_retrieval_recipe=None,
+):
     """
     Iterative phase retrieval (full coherence + optional partial coherence refinement)
     for single helicity (called pos) holograms.
@@ -604,47 +617,43 @@ def single_helicity_phase_retrieval_algorithm(pos: ArrayLike, mask_pixel: ArrayL
             )
 
             # Partial coherence: positive (arctan)
-            retrieved_p_pc, Error_diff_p_pc, Error_supp, gamma_p = (
-                PhaseRtrv_with_RL(
-                    diffract=np.sqrt(pos_pc_input),
-                    mask=supportmask,
-                    mode=recipe["algorithm_list_partial_coherence"][step],
-                    beta_zero=0.5,
-                    Nit=recipe["number_iterations_partial_coherence"][step],
-                    beta_mode="arctan",
-                    gamma=Startgamma,
-                    RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
-                    RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
-                    plot_every=349,
-                    Phase=Startimage,
-                    seed=False,
-                    real_object=False,
-                    bsmask=np.zeros_like(bsmask_p),
-                    average_img=30,
-                    Fourier_last=True,
-                )
+            retrieved_p_pc, Error_diff_p_pc, Error_supp, gamma_p = PhaseRtrv_with_RL(
+                diffract=np.sqrt(pos_pc_input),
+                mask=supportmask,
+                mode=recipe["algorithm_list_partial_coherence"][step],
+                beta_zero=0.5,
+                Nit=recipe["number_iterations_partial_coherence"][step],
+                beta_mode="arctan",
+                gamma=Startgamma,
+                RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
+                RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
+                plot_every=349,
+                Phase=Startimage,
+                seed=False,
+                real_object=False,
+                bsmask=np.zeros_like(bsmask_p),
+                average_img=30,
+                Fourier_last=True,
             )
 
             # Partial coherence: positive (const)
-            retrieved_p_pc, Error_diff_p_pc2, Error_supp, gamma_p = (
-                PhaseRtrv_with_RL(
-                    diffract=np.sqrt(pos_pc_input),
-                    mask=supportmask,
-                    mode=recipe["algorithm_list_partial_coherence"][step + 1],
-                    beta_zero=0.5,
-                    Nit=recipe["number_iterations_partial_coherence"][step + 1],
-                    beta_mode="const",
-                    gamma=gamma_p,
-                    RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
-                    RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
-                    plot_every=24,
-                    Phase=retrieved_p_pc,
-                    seed=False,
-                    real_object=False,
-                    bsmask=np.zeros_like(bsmask_p),
-                    average_img=30,
-                    Fourier_last=True,
-                )
+            retrieved_p_pc, Error_diff_p_pc2, Error_supp, gamma_p = PhaseRtrv_with_RL(
+                diffract=np.sqrt(pos_pc_input),
+                mask=supportmask,
+                mode=recipe["algorithm_list_partial_coherence"][step + 1],
+                beta_zero=0.5,
+                Nit=recipe["number_iterations_partial_coherence"][step + 1],
+                beta_mode="const",
+                gamma=gamma_p,
+                RL_freq=recipe["partial_coherence_frequency_of_RL_cycles"],
+                RL_it=recipe["partial_coherence_nr_iterations_per_RL_cycle"],
+                plot_every=24,
+                Phase=retrieved_p_pc,
+                seed=False,
+                real_object=False,
+                bsmask=np.zeros_like(bsmask_p),
+                average_img=30,
+                Fourier_last=True,
             )
 
             print("--- %s seconds ---" % np.round((time.time() - start_time), 2))
@@ -665,7 +674,16 @@ def single_helicity_phase_retrieval_algorithm(pos: ArrayLike, mask_pixel: ArrayL
     )
 
 
-def phase_retrieval_algorithm_on_second_helicity_only(new_helicity: ArrayLike, topo: ArrayLike, retrieved_topo: ArrayLike, retrieved_topo_pc: ArrayLike, gamma_topo: ArrayLike, mask_pixel: ArrayLike, supportmask: ArrayLike, phase_retrieval_recipe=None):
+def phase_retrieval_algorithm_on_second_helicity_only(
+    new_helicity: ArrayLike,
+    topo: ArrayLike,
+    retrieved_topo: ArrayLike,
+    retrieved_topo_pc: ArrayLike,
+    gamma_topo: ArrayLike,
+    mask_pixel: ArrayLike,
+    supportmask: ArrayLike,
+    phase_retrieval_recipe=None,
+):
     """
     Iterative phase retrieval which will be applied to the second helicity only,
     taking the already retrieved phases from a previous routine
@@ -825,9 +843,9 @@ def phase_retrieval_algorithm_on_second_helicity_only(new_helicity: ArrayLike, t
             print("############   -   CDI Partial Coherence")
 
             # Replace beamstop region with current reconstruction intensity
-            new_helicity_pc_input = (np.abs(retrieved_new) ** 2) * bsmask_new + new_helicity_input * (
-                1 - bsmask_new
-            )
+            new_helicity_pc_input = (
+                np.abs(retrieved_new) ** 2
+            ) * bsmask_new + new_helicity_input * (1 - bsmask_new)
 
             # Partial coherence: new helicity (const) (use gamma_topo as in original)
             retrieved_new_pc, Error_diff_new_pc2, Error_supp, gamma_new = (
@@ -868,6 +886,7 @@ def phase_retrieval_algorithm_on_second_helicity_only(new_helicity: ArrayLike, t
         gamma_new,
     )
 
+
 def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
     """
     Plot tracked phase retrieval errors and return concatenated error list.
@@ -879,13 +898,12 @@ def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
     fig : matplotlib.figure.Figure
     ax : matplotlib.axes.Axes
     """
-    
+
     # Initialize default algorithm lists if it is not provided
     default_recipe = default_phase_retrieval_recipe()
-    for key in ["algorithm_list_full_coherence",
-                "algorithm_list_partial_coherence"]:
+    for key in ["algorithm_list_full_coherence", "algorithm_list_partial_coherence"]:
         phase_retrieval_recipe.setdefault(key, default_recipe[key])
-            
+
     if ax is None:
         fig, ax = plt.subplots()
     else:
@@ -923,14 +941,14 @@ def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
         for i, key in enumerate(pc_keys):
             if key not in error:
                 continue
-    
+
             alg = phase_retrieval_recipe["algorithm_list_partial_coherence"][i]
             label = f"Partial coherence - {alg}"
-    
+
             error_list = np.asarray(error[key])
-    
+
             full_error_list.extend(error_list.tolist())
-    
+
             x = counter + np.arange(len(error_list))
             counter = x[-1] + 1
 
@@ -940,7 +958,9 @@ def plot_phase_retrieval_errors(error, phase_retrieval_recipe, ax=None):
     # Final formatting
     # -------------------------
     if len(full_error_list) > 0:
-        ax.set_title(f"Smallest Error: {np.min(full_error_list):.2f} dB, Final error: {full_error_list[-1]:.2f} dB")
+        ax.set_title(
+            f"Smallest Error: {np.min(full_error_list):.2f} dB, Final error: {full_error_list[-1]:.2f} dB"
+        )
 
     ax.legend()
     ax.set_xlabel("Tracked errors")
@@ -1014,7 +1034,6 @@ def _verify_valid_algorithm_list(
             f"{name}: invalid algorithm(s) detected: {invalid}. "
             f"Allowed algorithms are: {sorted(allowed_algorithms)}"
         )
-
 
 
 # ----------------------------
@@ -1162,7 +1181,7 @@ def _proj_CHIO(inv, prev, mask, beta, step_idx, Nit):
 
 
 def _proj_HPR(inv, prev, mask, beta, step_idx, Nit):
-    alpha = 0.4 
+    alpha = 0.4
     return (
         inv
         + (1 - mask) * (prev - (beta + 1) * inv)
@@ -1182,9 +1201,10 @@ PROJECTIONS = {
     "HPR": _proj_HPR,
 }
 
+
 # ----------------------------
 # Other Subprocesses
-# ---------------------------- 
+# ----------------------------
 def RL(Idelta, Iexp, gamma_cp, RL_it):
     """
     Richardson–Lucy update loop (CuPy).
@@ -1220,9 +1240,11 @@ def RL(Idelta, Iexp, gamma_cp, RL_it):
 
     return gamma_cp
 
+
 #############################################################
 #       MAIN PHASE RETRIEVAL FUNCTIONS
 # ############################################################
+
 
 # Full coherence phase retrieval algorithm
 def PhaseRtrv_GPU(
@@ -1281,7 +1303,7 @@ def PhaseRtrv_GPU(
     ------
     author: CK 2026
     """
-    
+
     diffract = np.asarray(diffract)
     mask = np.asarray(mask)
 
@@ -1332,13 +1354,12 @@ def PhaseRtrv_GPU(
     guess = np.fft.fftshift(guess)
     mask = np.fft.fftshift(mask)
     diffract = np.fft.fftshift(diffract)
-    
+
     # Move to GPU
     BSmask_cp = xp.asarray(bsmask)
     guess_cp = xp.asarray(guess)
     mask_cp = xp.asarray(mask)
     diffract_cp = xp.asarray(diffract)
-
 
     Error_diffr_list = []
     Error_supp_list = []
@@ -1359,7 +1380,7 @@ def PhaseRtrv_GPU(
 
         # Fourier constraint outside beamstop
         guess_cp = xp.where(
-            BSmask_cp,  
+            BSmask_cp,
             guess_cp,
             diffract_cp * xp.exp(1j * xp.angle(guess_cp)),
         )
@@ -1388,8 +1409,11 @@ def PhaseRtrv_GPU(
                     Best_error[j] = err
                     Best_guess[j, :, :] = guess_cp
 
-    # Average best guesses
-    guess_cp = xp.mean(Best_guess, axis=0)
+    # Average best guesses (only slots that were filled)
+    filled = xp.isfinite(Best_error)
+    if bool(filled.any()):
+        guess_cp = xp.mean(Best_guess[filled], axis=0)
+    # else: keep the last iterate guess_cp
 
     # Apply Fourier constraint one last time
     if Fourier_last:
@@ -1397,7 +1421,7 @@ def PhaseRtrv_GPU(
             1j * xp.angle(guess_cp)
         ) + guess_cp * BSmask_cp
 
-    guess = to_numpy(guess_cp,xp)
+    guess = to_numpy(guess_cp, xp)
     return np.fft.ifftshift(guess), Error_diffr_list, Error_supp_list
 
 
@@ -1416,7 +1440,7 @@ def PhaseRtrv_with_RL(
     seed=False,
     plot_every=20,
     bsmask=None,
-    real_object=False,   # kept for API compatibility (not used)
+    real_object=False,  # kept for API compatibility (not used)
     average_img=10,
     Fourier_last=True,
 ):
@@ -1472,7 +1496,7 @@ def PhaseRtrv_with_RL(
     # Get projection function
     proj_fn = PROJECTIONS.get(mode)
     if proj_fn is None:
-        raise ValueError(f"Invalid mode '{mode}'. Allowed: {sorted(PROJECTIONS_RL)}")
+        raise ValueError(f"Invalid mode '{mode}'. Allowed: {PROJECTIONS.keys()}")
 
     # Load beta scheduler
     Beta = make_beta_schedule(beta_mode, Nit, beta_zero)
@@ -1503,7 +1527,7 @@ def PhaseRtrv_with_RL(
     diffract_cp = xp.asarray(diffract)
 
     gamma_cp = xp.asarray(gamma)
-    gamma_cp /= (xp.sum(gamma_cp)) 
+    gamma_cp /= xp.sum(gamma_cp)
 
     Error_diffr_list = []
     Error_supp_list = []
@@ -1513,7 +1537,10 @@ def PhaseRtrv_with_RL(
     convolved = ifft2(fft2(xp.abs(guess_cp) ** 2) * fft2(gamma_cp))
 
     # Initialize prev: keep your original structure
-    prev = fft2((1 - BSmask_cp) * diffract_cp / xp.sqrt(convolved) * guess_cp + guess_cp * BSmask_cp)
+    prev = fft2(
+        (1 - BSmask_cp) * diffract_cp / xp.sqrt(convolved) * guess_cp
+        + guess_cp * BSmask_cp
+    )
 
     # Best guesses storage (robust)
     Best_guess = xp.zeros((average_img, l, n), dtype=xp.complex64)
@@ -1529,7 +1556,6 @@ def PhaseRtrv_with_RL(
         factor = diffract_cp / xp.sqrt(convolved)
         guess_cp[obs] *= factor[obs]
 
-        
         # ---- Real space ----
         inv = fft2(guess_cp)
 
@@ -1564,9 +1590,12 @@ def PhaseRtrv_with_RL(
                     Best_guess[j, :, :] = guess_cp
                     Best_gamma[j, :, :] = gamma_cp
 
-    # Average best guesses
-    guess_cp = xp.mean(Best_guess, axis=0)
-    gamma_cp = xp.mean(Best_gamma, axis=0)
+    # Average best guesses (only slots that were filled)
+    filled = xp.isfinite(Best_error)
+    if bool(filled.any()):
+        guess_cp = xp.mean(Best_guess[filled], axis=0)
+        gamma_cp = xp.mean(Best_gamma[filled], axis=0)
+    # else: keep the last iterate guess_cp / gamma_cp
 
     # Apply Fourier constraint one last time
     if Fourier_last:
@@ -1577,43 +1606,50 @@ def PhaseRtrv_with_RL(
     guess = to_numpy(guess_cp, xp)
     gamma = to_numpy(gamma_cp, xp)
 
-    return np.fft.ifftshift(guess), Error_diffr_list, Error_supp_list, np.fft.ifftshift(gamma)
+    return (
+        np.fft.ifftshift(guess),
+        Error_diffr_list,
+        Error_supp_list,
+        np.fft.ifftshift(gamma),
+    )
 
 
 #############################################################
 #    FILTER FOR OSS
 # ############################################################
-def W(npx,npy,alpha=0.1):
-    '''
+def W(npx, npy, alpha=0.1):
+    """
     Simple generator of a gaussian, used for filtering in OSS
     INPUT:  npx,npy: number of pixels on the image
-            alpha: width of the gaussian 
-            
+            alpha: width of the gaussian
+
     OUTPUT: gaussian matrix
-    
+
     --------
     author: RB 2020
-    '''
-    Y,X = xp.meshgrid(xp.arange(npy),xp.arange(npx))
-    k=(xp.sqrt((X-npx//2)**2+(Y-npy//2)**2))
-    return xp.fft.fftshift(xp.exp(-0.5*(k/alpha)**2))
+    """
+    Y, X = xp.meshgrid(xp.arange(npy), xp.arange(npx))
+    k = xp.sqrt((X - npx // 2) ** 2 + (Y - npy // 2) ** 2)
+    return xp.fft.fftshift(xp.exp(-0.5 * (k / alpha) ** 2))
+
 
 #############################################################
 #    ERROR FUNCTIONS
 # ############################################################
 
+
 def Error_diffract_cp(guess, diffract):
-    '''
-    Error on the diffraction attern of retrieved data. 
-    INPUT:  guess, diffract: retrieved and experimental diffraction patterns 
-            
+    """
+    Error on the diffraction attern of retrieved data.
+    INPUT:  guess, diffract: retrieved and experimental diffraction patterns
+
     OUTPUT: Error between the two
-    
+
     --------
     author: RB 2020
-    '''
-    Num=xp.abs(diffract-guess)**2
-    Den=xp.abs(diffract)**2
-    Error = Num.sum()/Den.sum()
-    Error=10*xp.log10(Error)
+    """
+    Num = xp.abs(diffract - guess) ** 2
+    Den = xp.abs(diffract) ** 2
+    Error = Num.sum() / Den.sum()
+    Error = 10 * xp.log10(Error)
     return to_numpy(Error, xp)
