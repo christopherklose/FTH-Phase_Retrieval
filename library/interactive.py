@@ -214,7 +214,11 @@ def cimshow(im, title = None, **kwargs):
 
 
 class InteractiveCenter:
-    """Plot image with controls for contrast and beamstop alignment tools."""
+    """
+    Plot image with controls for contrast and concentric circles to find the
+    center of the hologram (c0: vertical, c1: horizontal). Right click moves
+    the center to the mouse position; read the result from .c0 and .c1.
+    """
     
     def __init__(self, im, c0=None, c1=None, rBS=15, **kwargs):
         im = np.array(im)
@@ -861,15 +865,16 @@ class InteractiveCircleCoordinates:
 
 
 class InteractiveEllipseCoordinates:
-    def __init__(self, image, num_masks,coordinates=None):
-        """
-        Creates overlay with ellipses on an image. Sliders allow changing
-        between ellipses, adjust ellipse positions, ellipse sizes and rotation angle. Usefull for
-        creating support mask for holographically aided phase retrieval
-    
-        Return list of tuples with mask parameters (center, height, width, angle)
-        """
+    """
+    Creates overlay with ellipses on an image. Sliders allow changing
+    between ellipses, adjust ellipse positions, ellipse sizes and rotation angle. Usefull for
+    creating support mask for holographically aided phase retrieval
 
+    get_params() returns list of tuples ((xcenter, ycenter), height, width, angle in degrees)
+    (input for mask_lib.create_ellipse_supportmask)
+    """
+
+    def __init__(self, image, num_masks,coordinates=None):
         print("Use circle index slider to change between circles. The active circle is highlighted in red."
         )
         print("Right click to move circle to mouse position!")
@@ -993,6 +998,16 @@ class InteractiveEllipseCoordinates:
 
 
 class InteractiveArcCoordinates:
+    """
+    Creates overlay with arc (annular-sector) masks on an image. Sliders allow
+    changing between arcs, adjust center, inner/outer radius and angular range
+    (radians). The active arc is shown in red, all others in blue. Usefull for
+    creating support mask for holographically aided phase retrieval
+
+    get_params() returns [[ycenter, xcenter], [r0, r1], [phi0, phi1]] per arc
+    (input for mask_lib.create_arc_supportmask), return_mask() the combined mask.
+    """
+
     def __init__(self, image, num_masks, coordinates=None):
         self.image = image
         self.num_masks = num_masks
