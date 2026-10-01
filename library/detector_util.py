@@ -17,6 +17,15 @@ def correct_background(image, edge_range, std):
     Gaussian of width `std`. The left-edge profile is subtracted from the
     upper half of the image, and the right-edge profile from the lower half.
 
+    Parameters
+    ----------
+    image : 2d array
+        single camera frame
+    edge_range : int
+        nr of columns at the left and right edge used to estimate the background
+    std : float
+        std of the gaussian filter applied to the background profiles
+
     Returns
     -------
     image_corrected, background : ndarray (float), same shape as `image`
@@ -38,6 +47,19 @@ def correct_quadrant_background(image, offset=10, length=500):
     Subtract a constant background per quadrant, estimated as the
     nan-median of a (length x length) window in each outer corner,
     `offset` pixels from the image edges.
+
+    Parameters
+    ----------
+    image : 2d array
+        single camera frame
+    offset : int
+        distance in px of the corner windows from the image edges
+    length : int
+        side length in px of the corner windows
+
+    Returns
+    -------
+    image_corrected, background : ndarray (float), same shape as `image`
     """
     image = np.asarray(image, dtype=float)
     H, W = image.shape

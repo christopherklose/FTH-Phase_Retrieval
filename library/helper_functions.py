@@ -488,6 +488,22 @@ def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
 
 
 def complex_to_color(array, abs_range=[0, 100]):
+    """
+    Converts a complex 2d array into an rgb image: the phase is encoded as
+    hue (color), the amplitude as lightness.
+
+    Parameter
+    =========
+    array : 2d complex array
+        input array
+    abs_range : list of two scalars
+        percentiles of the amplitude mapped to lightness 0 and 1
+
+    Output
+    ======
+    rgb : array (Y, X, 3)
+        rgb image with values between 0 and 1
+    """
     # In HLS color system: hue (color), lightness, saturation
     # Angle should represent color
     hue = (np.angle(array) + np.pi) / (2 * np.pi)
@@ -507,6 +523,10 @@ def complex_to_color(array, abs_range=[0, 100]):
 
 
 def log_clip(image):
+    """
+    Logarithmic scaling for plotting, log10(image - min(image) + 1).
+    The minimum is shifted to 0, so the result is >= 0 (NaN-safe).
+    """
 
     image = np.log10(image-np.nanmin(image)+1)
 

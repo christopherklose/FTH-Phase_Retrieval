@@ -178,6 +178,9 @@ def shift_image_stack(image_stack, shift, interpolation=True, chunk_sz=None):
     shift: nr_images x 2 array
         x and y translation in px for each image
 
+    interpolation: bool
+        True: spline interpolation, False: shift in Fourier space
+
     chunk_sz: int
         nr of images per chunk, needed in case of large image arrays which might not fit into gpu memory
 
@@ -735,7 +738,8 @@ def filter_reference(holo, mask, settings):
     mask: numpy array
         (smooth) mask to crop cross correlation in Patterson map
     settings: dict
-        contains parameter for cropping
+        contains parameter for cropping:
+        - "low_dia": diameter in px of the cropped center of the Patterson map
 
     Returns
     -------
@@ -1499,8 +1503,17 @@ def process_cluster(
         pair correlation map
     cluster_assignment: array
         assignment of frames to cluster
+    order: int
+        applys distance metric order-times to the subcluster correlation map (feedback plots)
+    linkage_method: str
+        scipy.cluster.hierarchy linkage methods (feedback plots)
+    metric: str
+        distance metric applied to the correlation map. Choose sklearn
+        pairwise_distances metrics (feedback plots)
     save: bool
         save new subclusters in "cluster"-list and delete current cluster from list
+    plot: bool
+        show feedback plots of each new subcluster
 
     Returns
     -------
@@ -1899,13 +1912,31 @@ Python Dictionary for Phase retrieval in Python using functions defined in fth_r
 
 
 def create_hdf5(dict0, filename, extension=".hdf5"):
+    """
+    Saves a (nested) dictionary as hdf5 file
+
+    Parameters
+    ----------
+    dict0: dict
+        data to save, nested dicts become hdf5 groups, None values are skipped
+    filename: str
+        output filename without extension
+    extension: str
+        file extension, default ".hdf5"
+    -------
+    author: CK
+    """
 
     f = createHDF5(dict0, filename, extension=extension)
     f.close()
 
 
 def createHDF5(dict0, filename, extension=".hdf5", f=None):
-    """creates HDF5 data structures strating from a dictionary. supports nested dictionaries"""
+    """
+    Creates HDF5 data structures starting from a dictionary. Supports nested
+    dictionaries. Helper of create_hdf5; returns the open file/group f, which
+    the caller has to close.
+    """
     #   print(dict0.keys())
 
     #    try:
@@ -1942,6 +1973,25 @@ def createHDF5(dict0, filename, extension=".hdf5", f=None):
 
 
 def read_hdf5(filename, extension=".hdf5", print_option=True):
+    """
+    Loads a hdf5 file into a (nested) dictionary
+
+    Parameters
+    ----------
+    filename: str
+        filename without extension
+    extension: str
+        file extension, default ".hdf5"
+    print_option: bool
+        print the file structure while loading
+
+    Returns
+    -------
+    dict_output: dict
+        file content, hdf5 groups become nested dicts
+    -------
+    author: CK
+    """
 
     with h5py.File(filename + extension, "r") as f:
         dict_output = readHDF5(f, print_option=print_option, extension=extension)
@@ -1950,6 +2000,9 @@ def read_hdf5(filename, extension=".hdf5", print_option=True):
 
 
 def readHDF5(f, print_option=True, extension=".hdf5", dict_output=None):
+    """
+    Recursively reads an open hdf5 file/group into a dictionary. Helper of read_hdf5.
+    """
 
     # New dict for every call (a mutable default would be shared between calls)
     if dict_output is None:

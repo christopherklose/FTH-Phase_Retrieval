@@ -227,7 +227,9 @@ def load_images(fnames, loadmode="avg", n_jobs=1, crop=0, square_shape = True, b
         Force square shaped arrays
     binning : int
         pixel binning
-        
+    verbose : bool
+        print each loaded filename (only loadmode "frames")
+
     Output
     ======
     images : array
@@ -299,7 +301,13 @@ def load_specific_frames(fnames, indexes, crop=None,square_shape = False, binnin
         relevant frames indexes of a given fname
     crop : int or None
         crops images symmtrically by "crop" number of pixels [crop:-crop]
-        
+    square_shape : bool
+        Force square shaped arrays
+    binning : int
+        pixel binning
+    verbose : bool
+        print each loaded filename
+
     Output
     ======
     images : array
@@ -425,6 +433,8 @@ def load_processing_frames(fnames, loadmode="avg", crop=0, frame_index_list=None
         pixel binning
     nr_jobs : int
         number of jobs, i.e., available cpu threads
+    verbose : bool
+        print each loaded filename
 
     Output
     ======
