@@ -13,8 +13,10 @@ from os.path import join
 from os import path
 from glob import glob
 from collections import defaultdict
+from pathlib import Path
 
 from tqdm.auto import tqdm
+import h5py
 from joblib import Parallel, delayed
 
 import numpy as np
@@ -570,3 +572,43 @@ def find_duplicates_with_indices(numbers):
     }
 
     return duplicates, singuletts
+
+
+# Writing and reading of log files (same as in hdf5_loading.py)
+def _write_group(group, data):
+    """Recursively write a dict into an HDF5 group. Nested dicts become subgroups; None values are skipped."""
+    for key, value in data.items():
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            _write_group(group.create_group(key), value)
+        else:
+            group.create_dataset(key, data=value)
+
+
+def _read_group(group, verbose=False, indent=0):
+    """Recursively read an HDF5 group into a (nested) dict."""
+    out = {}
+    pad = "    " * indent
+    for key, item in group.items():
+        if isinstance(item, h5py.Group):
+            if verbose:
+                print(f"{pad}### {key}")
+            out[key] = _read_group(item, verbose, indent + 1)
+        else:
+            out[key] = item[()]
+            if verbose:
+                print(f"{pad}• {key:<25} {type(out[key]).__name__}")
+    return out
+
+
+def create_hdf5(data, filename, extension=".hdf5"):
+    """Write a (nested) dict to an HDF5 file."""
+    with h5py.File(Path(f"{filename}{extension}"), "w") as f:
+        _write_group(f, data)
+
+
+def read_hdf5(filename, verbose=False):
+    """Read an HDF5 file into a (nested) dict."""
+    with h5py.File(Path(f"{filename}"), "r") as f:
+        return _read_group(f, verbose=verbose)
