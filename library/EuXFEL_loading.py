@@ -7,8 +7,7 @@ import h5py
 import numpy as np 
 import toolbox_scs as tb
 import xarray as xr
-from tqdm import tqdm
-
+from tqdm.auto import tqdm
 
 
 ##########################################################################
@@ -20,10 +19,33 @@ mnemonics["MTE3"] = "MTE3"
 mnemonics["FFT_MCPraw"] = "FFT_MCPpeaks"
 mnemonics["FFT_REFLraw"] = "FFT_MCPpeaks"
 mnemonics["FFT_PD2raw"] = "FFT_PD2peaks"
+
+mnemonics["AppleX"] = "AppleX"
 mnemonics["transmission"] = "transmission"
-mnemonics["Delay"] = 'PP800_DelayLine'
-mnemonics["t0"] =  'PP800_T0_mm'
+mnemonics["transmission_col2"] = "transmission_col2"
+mnemonics["PP800_HWP_POWER"] = "PP800_HWP_POWER"
+mnemonics["PP800_SynchDelayLine"]="PP800_SynchDelayLine"
+mnemonics["SCS_XGM"] = "SCS_SA3"
+mnemonics["SCS_SA3"] = "SCS_SA3"
+mnemonics["magnet"] = "magnet"
+mnemonics["magnet_current"]="magnet_current"
 mnemonics["energy"] = "nrj"
+
+
+mnemonics["Delay"] = 'PP800_SynchDelayLine'
+mnemonics["t0"] =  'PP800_T0_mm'
+
+mnemonics["magnet_mT"] = "/scan/data/m_caena"
+mnemonics["magnet_A"] = "/scan/data/m_magnetA"
+mnemonics["data"] = "/scan/data"
+mnemonics["collection"] = "/scan/instrument/collection"
+mnemonics["nrj"] = "nrj"
+mnemonics["marana"] = "measurement/m_marana"
+mnemonics["measurement"] = "/scan/instrument/collection"
+mnemonics["helicity"] = "measurement/pre_scan_snapshot/und_shift"
+mnemonics["nx_marana"] = "/entry/instrument/detector/data"
+mnemonics["framerate"] = "/entry/instrument/detector/framerate"
+mnemonics["temperature"] = "/scan/data/cryoin4"
 
 ##########################################################################
 
@@ -31,6 +53,7 @@ mnemonics["energy"] = "nrj"
 def load_mnemonics():
     """Return mnemonics dictionary"""
     return mnemonics
+
 
 
 
@@ -117,4 +140,33 @@ def load_key(proposal, run_nr, key):
     data[key]=run_data[key].values
         
     return data
+
+
+
+
+# Load image files
+def load_images(fname):
+    """
+    Load only image data
+    
+    Parameter
+    =========
+    fname : str
+        filename of data file
+    im_id : int
+        experiment data identifier number
+        
+    Output
+    ======
+    images : array
+        image data
+    ======
+    author: ck 2024
+    """
+
+    # Load only relevant image data
+    data = load_data(fname, mnemonics["measurement"], keys = [mnemonics["images"]])
+
+    return data[mnemonics["images"]].squeeze()
+
 
