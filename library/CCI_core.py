@@ -300,8 +300,8 @@ def image_registration(
         else:
             roi_s = np.s_[roi[2] : roi[3], roi[0] : roi[1]]
             shift, error, diffphase = phase_cross_correlation(
-                image_background[roi_s],
                 image_unproccessed[roi_s],
+                image_background[roi_s],
                 upsample_factor=100,
             )
 
@@ -343,8 +343,8 @@ def image_registration(
         shift = np.round(shift, 2)
 
     if im_out == True:
-        # Shift Image
-        image_corrected = shift_image(image_unproccessed, shift)
+        # Shift Image (shift is the offset of the moving image, correct with -shift)
+        image_corrected = shift_image(image_unproccessed, -shift)
 
         return image_corrected, shift
     else:
