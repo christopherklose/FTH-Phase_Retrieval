@@ -289,7 +289,7 @@ def create_hdf5(data, filename, extension=".hdf5"):
         _write_group(f, data)
 
 
-def read_hdf5(filename, print_option=True):
+def read_hdf5(filename, verbose=False):
     """Read an HDF5 file into a (nested) dict."""
     with h5py.File(Path(f"{filename}"), "r") as f:
-        return _read_group(f, verbose=print_option)
+        return _read_group(f, verbose=verbose)
