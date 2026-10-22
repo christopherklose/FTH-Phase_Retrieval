@@ -1,0 +1,614 @@
+"""
+Python library for SwissFEL experiments with 2d image detector
+
+2024
+@authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
+            SG: Simon Gaebel (Simon.Gaebel@mbi-berlin.de)
+"""
+
+
+import sys, os
+import time
+from os.path import join
+from os import path
+from glob import glob
+from collections import defaultdict
+from pathlib import Path
+
+from tqdm.auto import tqdm
+import h5py
+from joblib import Parallel, delayed
+
+import numpy as np
+
+from sfdata import SFDataFiles, SFScanInfo, SFProcFile
+import helper_functions as helper
+
+
+
+# Commonly used hdf5 entries. SwissFEL specific
+mnemonics = dict()
+mnemonics["Photon-Energy-PER-PULSE-AVG"] = "SATFE10-PEPG046:PHOTON-ENERGY-PER-PULSE-AVG"
+mnemonics["images"] = "SATES20-HOLO-CAM01:FPICTURE"
+mnemonics["I0_intensity_Ar"] = "SATES21-GES1:A2_VALUES"
+mnemonics["Diode"] = "SATES21-GES1:A4_VALUES"
+mnemonics["photonenergy"] = "SATOP11-OSGM087:photonenergy"
+
+def load_mnemonics():
+    """Return mnemonics dictionary"""
+    return mnemonics
+
+
+def frame_list_to_acq_and_idx(frame_list, stack_length):
+    """
+    Convert a continous list of frame index that span multiple acq stacks into
+    its corresponding acq numbers and frames, e.g. for stack_length = 100:
+    frame_list = [99,100,101] --> acq_nrs = [1,2], frame_index_list = [[99],[0,1]]
+    
+    Parameter
+    =========
+    frame_list : list 
+        list of successive frames
+    stack_length: int
+        length of frame stack
+        
+    Output
+    ======
+    acq_nrs : array
+        stack indexes
+    frame_index_list : nested list
+        frames corresponding to a given stack
+    ======
+    author: ck 2024
+    """
+    
+    # Calc quotient of frame_list and acq stack length to find relevant acq idx
+    acq_idx = np.array(np.divmod(frame_list, stack_length))
+
+    # Setup lists
+    acq_nrs = []
+    frame_index_list = []
+
+    # Group frames that correspond to identical acq_stackd to minimize data access
+    for i in np.unique(acq_idx[0]):
+        acq_nrs.append(i + 1)  # First stack is acq0001
+        frame_idx = np.where(acq_idx[0] == i)
+        frame_index_list.append(acq_idx[1][frame_idx])
+
+    return np.array(acq_nrs), frame_index_list
+
+
+def list_data_filenames(run_nr,BASEFOLDER,  search_key="*"):
+    """
+    Returns a list of ALL data files that correspond to the
+    given run number and contain the search key
+    
+    Parameter
+    =========
+    run_nr : int or str
+        identifier of experiment run
+    BASEFOLDER : str
+        general beamtime folder
+    search_key : str
+        searches files for additional key. Default: all files
+        
+    Output
+    ======
+    files : list
+        list of searched filenames
+    folder : str
+        folder of run nr
+    ======
+    author: ck 2024
+    
+    """
+
+    # Convert run number to string
+    if type(run_nr) == int:
+        run_nr = "*%04d*" % run_nr
+
+    # Find folder that corresponds to run number
+    folder = glob(join(BASEFOLDER, "raw", run_nr))[0]
+    print("Found folder: %s" % folder)
+
+    # Get sorted list of files in folder
+    files = sorted(glob(join(folder, "data", search_key)))
+
+    return files, folder
+
+
+def list_acquisition_filenames(run_nr,BASEFOLDER, acq_nrs=None, ONLY_CAMERA=False):
+    """
+    Returns a list of data files for the given acquisition
+    numbers
+    
+    Parameter
+    =========
+    run_nr : int 
+        identifier of experiment run
+    BASEFOLDER : str
+        general beamtime folder
+    acq_nrs : iterable list, array
+        acquisition numbers to load. Default: all acquisitions (None)
+    ONLY_CAMERA : bool
+        exports only camera acquisition files names if True or all related
+        h5 files if False
+        
+    Output
+    ======
+    fnames_flattened : list
+        list of filenames of the given acquisition numbers
+    ======
+    author: ck 2024
+    
+    """
+
+    # Load only camera files?
+    if ONLY_CAMERA:
+        search_key = "*CAMERAS.h5"
+    else:
+        search_key = "*"
+
+    # If for run_nr is only gives a int number
+    if type(run_nr) == int:
+        run_nr = "*%04d*" % int(run_nr)
+    elif type(run_nr) == float:
+        run_nr = "*%04d*" % int(run_nr)
+    elif isinstance(run_nr, np.generic):
+        run_nr = "*%04d*" % int(run_nr)
+
+    # If list is empty all files are loaded, only specific acquisition nrs
+    # otherwise
+    if acq_nrs is None:
+        fnames, _ = list_data_filenames(run_nr,BASEFOLDER, search_key=search_key)
+    else:
+        _, folder = list_data_filenames(run_nr,BASEFOLDER,  search_key=search_key)
+
+        fnames = []
+        
+        for acq_nr in acq_nrs:
+            acq_str = f"*{acq_nr:04d}{search_key}"
+
+            # Get filename pattern
+            fname_pattern = join(
+                folder,
+                "data",
+                acq_str,
+            )
+
+            fnames.append(glob(fname_pattern))
+
+    # Flatten potential nested list
+    fnames_flattened = helper.flatten_list(fnames)
+
+    return fnames_flattened
+
+
+def load_run(fnames, mnemonics):
+    """
+    Load all relevant data that are specified in the mnemonics dict (bugged)
+    """
+
+    data = dict()
+    N = len(fnames)
+    
+    with SFDataFiles(fnames[0]) as f:
+        for key in mnemonics.keys():
+            try:
+                data[key] = f[mnemonics[key]].data
+            except:
+                pass
+    if N > 1:
+        for fname in tqdm(fnames[1:]):
+            with SFDataFiles(fname) as f:
+                for key in mnemonics.keys():
+                    try:
+                        data[key] = np.concatenate((data[key], f[mnemonics[key]].data))
+                    except:
+                        pass
+    
+    return data
+
+
+def load_images(fnames, loadmode="avg", n_jobs=1, crop=0, square_shape = True, binning = 1, verbose = False):
+    """
+    Loads images from list of filenames.
+    
+    Parameter
+    =========
+    fnames : list
+        list of image acquisition filenames
+    loadmode : str
+        "avg": return average over all frames of a given filenames
+        "frames": return all single frames
+    n_jobs : int
+        number of jobs, i.e., available cpu threads
+    crop : int
+        crops images symmtrically by "crop" number of pixels
+    square_shape : bool
+        Force square shaped arrays
+    binning : int
+        pixel binning
+    verbose : bool
+        print each loaded filename (only loadmode "frames")
+
+    Output
+    ======
+    images : array
+        numpy array of images
+    ======
+    author: ck 2024    
+    """
+
+    # Setup
+    images = []
+    N = len(fnames)
+
+    # Cropping necessary?
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
+    else:
+        slice_crop = slice(crop, -crop)
+
+    # Define loader function based on required loadmode
+    if loadmode == "frames":
+
+        def loader(fname):
+            with SFDataFiles(fname) as f:
+                if verbose is True:
+                    print("Loading: %s"%fname)
+                image_stack = np.array(f[mnemonics["images"]][:, slice_crop, slice_crop].data)
+
+            if square_shape is True:
+                image_stack = helper.make_square_shape(image_stack.astype("float32"))
+            if binning > 1:
+                image_stack = helper.binning(image_stack, binning)
+            
+            return image_stack
+
+    elif loadmode == "avg":
+
+        def loader(fname):
+            with SFDataFiles(fname) as f:
+                image = np.mean(
+                    f[mnemonics["images"]][:, slice_crop, slice_crop].data, axis=0
+                )
+
+            if square_shape is True:
+                image = helper.make_square_shape(image.astype("float32"))
+            if binning > 1:
+                image = helper.binning(image, binning)
+            
+            return image
+
+    print(f"Start loading images with {n_jobs} parallel processes.")
+    t0 = time.time()
+    images = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(loader)(fname) for fname in fnames
+    )
+    print(f"Elapsed time: {time.time()-t0} seconds.")
+
+    return np.array(helper.drop_inhomogenous_part(images))
+
+
+def load_specific_frames(fnames, indexes, crop=None,square_shape = False, binning = 1, verbose = False):
+    """
+    Load only specific frames for a list of acquisition filenames
+    
+    Parameter
+    =========
+    fnames : list
+        list of image acquisition filenames
+    indexes : nested list
+        relevant frames indexes of a given fname
+    crop : int or None
+        crops images symmtrically by "crop" number of pixels [crop:-crop]
+    square_shape : bool
+        Force square shaped arrays
+    binning : int
+        pixel binning
+    verbose : bool
+        print each loaded filename
+
+    Output
+    ======
+    images : array
+        numpy array of all relevant single frame images
+    ======
+    author: ck 2024  
+    """
+
+    # Setup
+    images = []
+
+    # Cropping necessary?
+    if (crop == 0) or  (crop == None):
+        slice_crop = slice(None)
+    else:
+        slice_crop = slice(crop, -crop)
+
+    # Loop over different fnames and indices
+    for i, fname in enumerate(fnames):
+        # Load only relevant frames from file
+        with SFDataFiles(fname) as f:
+            if verbose is True:
+                print("Loading: %s"%fname)
+            image = f[mnemonics["images"]][indexes[i], slice_crop, slice_crop].data
+        images.append(image)
+
+    images = np.vstack(images)
+    
+    if square_shape is True:
+        images = helper.make_square_shape(images.astype("float32"))
+    if binning > 1:
+        images = helper.binning(images, binning)
+    
+    return images
+
+
+# Full image loading procedure
+def load_processing(im_id, BASEFOLDER, loadmode="avg", binning=1, crop=0, nr_jobs = 1):
+    """
+    Loads all images, averaging over all images,
+    padding to square shape, binning, Additional cropping (optional) etc.
+
+    Parameter
+    =========
+    im_id : int or list of int
+        image data identifier number, if list images of multiple scans are 
+        going to be averaged
+    BASEFOLDER : str
+        general beamtime folder
+    loadmode : str
+        "avg": return average over all frames of a given filenames
+        "frames": return all single frames
+    binning : int
+        additional binning of pixels in image
+    crop : int
+        crops images symmtrically by "crop" number of pixels
+    nr_jobs : int
+        number of jobs, i.e., available cpu threads
+
+    Output
+    ======
+    image : array
+        average over all images
+    images : array
+        loaded images (average per scan if im_id is a list)
+    ======
+    author: ck 2024
+    """
+
+    # Load image or list of images
+    images = []
+    if isinstance(im_id, list):
+        for idx in im_id:
+            ids = list_acquisition_filenames(
+                int(idx), BASEFOLDER, acq_nrs=None, ONLY_CAMERA=True
+            )
+            image, _ = load_processing_frames(
+                ids, loadmode=loadmode, crop=crop, nr_jobs=nr_jobs
+            )
+            images.append(image)
+        images = np.stack(images)
+        image = np.mean(images, axis=0)
+    else:
+        ids = list_acquisition_filenames(
+            im_id, BASEFOLDER, acq_nrs=None, ONLY_CAMERA=True
+        )
+        image, _ = load_processing_frames(
+            ids, loadmode=loadmode, crop=crop, nr_jobs=nr_jobs
+        )
+        images = image.copy()
+
+    # Zeropad to get square shape
+    image = helper.padding(image)
+    images = helper.padding(images)
+
+    # Binning
+    image = helper.binning(image, binning)
+    images = helper.binning(images, binning)
+
+    return image, images
+
+
+# Full image loading procedure
+def load_processing_frames(fnames, loadmode="avg", crop=0, frame_index_list=None,square_shape = True, binning = 1,nr_jobs = 1, verbose = False):
+    """
+    Loads images, calc average over all images,
+    padding to square shape, Additional cropping (optional)
+    
+    Parameter
+    =========
+    fnames : list
+        list of image acquisition filenames
+    loadmode : str
+        "avg": return average over all frames of a given filenames
+        "frames": return all single frames
+    frame_index_list : nested list
+        relevant frames indexes of a given fname
+    crop : int
+        crops images symmtrically by "crop" number of pixels
+    square_shape : bool
+        Force square shaped arrays
+    binning : int
+        pixel binning
+    nr_jobs : int
+        number of jobs, i.e., available cpu threads
+    verbose : bool
+        print each loaded filename
+
+    Output
+    ======
+    image : array
+        average over all images
+    images : array
+        numpy array of all relevant single frame images
+    ======
+    author: ck 2024  
+    """
+    # Basic loading of stacks into list
+    if frame_index_list == None:
+        images = load_images(fnames, loadmode, n_jobs=nr_jobs, crop=crop,square_shape = square_shape, binning = binning,verbose = verbose)
+    else:
+        images = load_specific_frames(fnames, frame_index_list, crop=crop,square_shape = square_shape, binning = binning, verbose = verbose)
+
+    # Calculate mean
+    if images.ndim > 2:
+        image = np.mean(images, axis=0)
+    else:
+        image = images.copy()
+
+    return image, images
+
+
+def load_readback(run_nr, BASEFOLDER):
+    """
+    Loads readback values from scan data files, i.e., parameter values for an energy
+    or fluence scan
+
+    Parameter
+    =========
+    run_nr : int or str
+        identifier of experiment run
+    BASEFOLDER : str
+        general beamtime folder
+
+    Output
+    ======
+    read_back_value : array
+        actual scan parameter which was read out / reached
+    set_values: array
+        set values of the parameter
+    ======
+    author: ck 2024
+    """
+    
+    # Get data folder of run_nr
+    _, folder = list_data_filenames(run_nr, BASEFOLDER, search_key="*PVDATA*")
+    
+    # Load read back and set values from .json files
+    read_back_values = SFScanInfo(folder + "/meta/scan.json").readbacks
+    set_values = SFScanInfo(folder + "/meta/scan.json").values
+
+    return read_back_values, set_values
+
+
+def drop_faulty_acquisitions(run_nr, BASEFOLDER):
+    """
+    In case that the FEL is down during a scan, the scan will pause. When the FEL is back
+    up again, the latest scan point will be repeated and then the scan continues as normal.
+    This leads to multiple scans points for identical parameter set values.
+    
+    This function drops all scan points of aborted scans and returns readback value indices of
+    valid read back values.
+
+    Parameter
+    =========
+    run_nr : int or str
+        identifier of experiment run
+    BASEFOLDER : str
+        general beamtime folder
+
+    Output
+    ======
+    new_indices : array
+        indices of valid read back values for indexing
+    ======
+    author: ck 2024
+    """
+    
+    # Get readback set values
+    _, readback_values = load_readback(run_nr, BASEFOLDER)
+
+    # Find douplicates in readback values
+    duplicates, singuletts = find_duplicates_with_indices(readback_values)
+
+    # Combine relevant acquisitions
+    new_indices = []
+    for key, values in duplicates.items():
+        new_indices.append(values[-1])
+
+    # Return as numpy array with adjusted acquisition values
+    new_indices = sorted(helper.flatten_list([list(singuletts.values()), new_indices]))
+    new_indices = np.array(new_indices) + 1
+    
+    return new_indices
+
+
+def find_duplicates_with_indices(numbers):
+    """
+    Helper function for drop_faulty_acquisitions. Finds duplicates in a list of float numbers and returns them along with their indices.
+
+    Parameter
+    =========
+    numbers : list or array
+        list or array of numbers with duplicates and singuletts
+
+    Output
+    ======
+    duplicates : dict
+        key is the value of a duplicate in numbers, key value are indices of duplicate in numbers 
+    singuletts: dict
+        key is the value of a singuletts in numbers, key value are indices of singuletts in numbers 
+    ======
+    author: ck 2024
+    """
+
+
+    # Dictionary to track the indices of each number
+    indices_dict = defaultdict(list)
+
+    # Populate the dictionary with indices for each number
+    for index, number in enumerate(numbers):
+        indices_dict[number].append(index)
+
+    # Filter out non-duplicates and keep only the duplicates
+    duplicates = {
+        number: indices for number, indices in indices_dict.items() if len(indices) > 1
+    }
+    singuletts = {
+        number: indices for number, indices in indices_dict.items() if len(indices) == 1
+    }
+
+    return duplicates, singuletts
+
+
+# Writing and reading of log files (same as in hdf5_loading.py)
+def _write_group(group, data):
+    """Recursively write a dict into an HDF5 group. Nested dicts become subgroups; None values are skipped."""
+    for key, value in data.items():
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            _write_group(group.create_group(key), value)
+        else:
+            group.create_dataset(key, data=value)
+
+
+def _read_group(group, verbose=False, indent=0):
+    """Recursively read an HDF5 group into a (nested) dict."""
+    out = {}
+    pad = "    " * indent
+    for key, item in group.items():
+        if isinstance(item, h5py.Group):
+            if verbose:
+                print(f"{pad}### {key}")
+            out[key] = _read_group(item, verbose, indent + 1)
+        else:
+            out[key] = item[()]
+            if verbose:
+                print(f"{pad}• {key:<25} {type(out[key]).__name__}")
+    return out
+
+
+def create_hdf5(data, filename, extension=".hdf5"):
+    """Write a (nested) dict to an HDF5 file."""
+    with h5py.File(Path(f"{filename}{extension}"), "w") as f:
+        _write_group(f, data)
+
+
+def read_hdf5(filename, verbose=False):
+    """Read an HDF5 file into a (nested) dict."""
+    with h5py.File(Path(f"{filename}"), "r") as f:
+        return _read_group(f, verbose=verbose)

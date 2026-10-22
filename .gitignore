@@ -1,0 +1,9 @@
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Personal Claude Code settings
+.claude/settings.local.json

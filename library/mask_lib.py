@@ -1,16 +1,13 @@
-"""
-Python library for processing of geometric masks
-
-2024
-@authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
-"""
-
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from matplotlib.path import Path
 
 # scipy
 import scipy as sp
 from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import fourier_shift
+from scipy.ndimage import shift as scipy_shift
+from scipy.fft import fft2, ifft2
 
 # dipy
 from dipy.segment.mask import median_otsu
@@ -19,23 +16,37 @@ from dipy.segment.mask import median_otsu
 import skimage.morphology
 from skimage.draw import ellipse
 
-# Is there a GPU?
-try:
-    # Cupy
-    import cupy as cp
-    import cupyx as cpx
 
-    GPU = True
+def shift_image(image, shift, interpolation=True):
+    """
+    Shifts image with sub-pixel precission in Fourier space
 
-    print("GPU available")
+    Parameters
+    ----------
+    image: array
+        Moving image, will be shifted by shift vector
+    shift: vector
+        x and y translation in px
 
-    # Self-written library
-    import CCI_core_cupy as cci
-except:
-    GPU = False
-    import CCI_core as cci
+    Returns
+    -------
+    image_shifted: array
+        Shifted image
+    -------
+    author: CK 2023
+    """
 
-    print("GPU unavailable")
+    if np.sum(np.abs(np.array(shift))) > 1e-12:
+        # Shift Image
+        if interpolation is True:
+            shifted_image = scipy_shift(image, shift, mode="reflect")
+        else:
+            shifted_image = fourier_shift(fft2(image), shift)
+            shifted_image = ifft2(shifted_image)
+
+        return shifted_image
+    else:
+        return image
 
 
 #Draw circle mask
@@ -88,7 +99,8 @@ def create_single_polygon_mask(shape, coordinates):
     shape : int tuple
         shape/dimension of output array
     coordinates: nested list
-        coordinates of polygon corner points [(yc_1,xc_1),(yc_2,xc_2),...]
+        coordinates of polygon corner points [(xc_1,yc_1),(xc_2,yc_2),...]
+        (matplotlib order, as returned by interactive.draw_polygon_mask)
 
 
     Output
@@ -120,7 +132,7 @@ def create_polygon_mask(shape, coordinates):
         shape/dimension of output array
     coordinates: nested list
         coordinates of polygon corner points for multiple polygons
-        [[(yc_1,xc_1),(yc_2,xc_2),...],[(yc_1,xc_1),(yc_2,xc_2),...]]
+        [[(xc_1,yc_1),(xc_2,yc_2),...],[(xc_1,yc_1),(xc_2,yc_2),...]]
 
     Output
     ======
@@ -151,6 +163,8 @@ def load_poly_masks(shape, mask_dict, polygon_name_list):
     =========
     shape : tuple
         shape of output mask
+    mask_dict : dict
+        polygon coordinates of all stored masks, {name: nested list of corner points}
     polygon_name_list : list
         keys of different mask coordinates to load
 
@@ -232,13 +246,13 @@ def auto_shift_mask(
     if crop is not None:
         tmask, timage = mask[crop:-crop, crop:-crop], image[crop:-crop, crop:-crop]
     else:
-        tmask, timage = mask.copy(), timage.copy()
+        tmask, timage = mask.copy(), image.copy()
 
     # Loop over all combinations of shifts
     for i, y in enumerate(yshift):
         for j, x in enumerate(xshift):
             # Shift mask to new position
-            mask_shift = cci.shift_image(tmask, [y, x])
+            mask_shift = shift_image(tmask, [y, x])
 
             # Calculate overlap
             overlap[i, j] = np.sum(mask_shift * timage)
@@ -260,14 +274,14 @@ def auto_shift_mask(
         )
 
     # Output
-    optimized_shift = (yshift[idx[0]], yshift[idx[1]])
+    optimized_shift = (yshift[idx[0]], xshift[idx[1]])
     print(
         "Best mask overlap for shift: [%.2f,%.2f]"
         % (optimized_shift[0], optimized_shift[1])
     )
 
     # Shift
-    mask_shifted = cci.shift_image(mask, optimized_shift)
+    mask_shifted = shift_image(mask, optimized_shift)
 
     # Binarize mask (necessary for sub-px shift)
     mask_shifted[mask_shifted > 0.5] = 1
@@ -315,8 +329,9 @@ def create_ellipse_supportmask(support_coordinates, shape):
     Parameter
     =========
     support_coordinates: nested list
-        Contains center coordinates, height, width and rotation angle of each aperture
-        [[(yc_1,xc_1),height_1,width_1,angle_1],[(yc_2,xc_2),height_2,width_2,angle_2],...]
+        Contains center coordinates, height, width and rotation angle (degrees) of each aperture
+        [[(xc_1,yc_1),height_1,width_1,angle_1],[(xc_2,yc_2),height_2,width_2,angle_2],...]
+        (as returned by interactive.InteractiveEllipseCoordinates)
     shape : int tuple
         shape/dimension of output array
 
@@ -338,7 +353,15 @@ def create_ellipse_supportmask(support_coordinates, shape):
             support_coordinates[i][2],
             support_coordinates[i][3],
         )
-        yy, xx = ellipse(center[1], center[0], height / 2, width / 2, rotation=-angle)
+        # angle from InteractiveEllipseCoordinates is in degrees, skimage needs radians
+        yy, xx = ellipse(
+            center[1],
+            center[0],
+            height / 2,
+            width / 2,
+            shape=shape,
+            rotation=-np.deg2rad(angle),
+        )
         supportmask[yy, xx] = 1
 
     return supportmask
@@ -346,7 +369,8 @@ def create_ellipse_supportmask(support_coordinates, shape):
 
 def automated_beamstop_center(image, threshold, radius, expand, method = "intensity"):
     """
-    Automatically determine beamstop close to center using otsu thresholding
+    Automatically determine beamstop close to center by thresholding
+    (intensity, gradient or otsu). Care: method "otsu" modifies the input image.
 
     Parameter
     =========
@@ -453,3 +477,93 @@ def mask_postprocessing(mask, radius, expand):
     )
     
     return mask
+
+
+
+def arc_mask(
+        shape,
+        center,
+        radius_range: tuple[float, float],
+        angle_range: tuple[float, float],
+        sigma=None,
+    ) -> NDArray[np.float64]:
+        """Binary annular-sector mask with optional Gaussian edge smoothing.
+
+        Returns a 2-D array (broadcast from ``shape``) with 1 inside the arc
+        and 0 outside. Values are in [0, 1] after smoothing.
+
+        Parameter
+        =========
+        shape: int tuple
+            shape of final mask
+        center: tuple
+            center position of arc
+        radius_range: tuple
+            radius of inner and outer part of arc
+        angle_range: tuple
+            angular range of arc in radians
+        sigma: float or None
+            smoothing std of gaussian filter applied for mask smoothing
+    
+        Output
+        ======
+        mask: array
+            binary mask
+        ======
+        author: ck 2026
+        """
+        ny, nx = shape
+        dy = np.arange(ny, dtype=float)[:, None] - center[0]
+        dx = np.arange(nx, dtype=float)[None, :] - center[1]
+
+        r = np.sqrt(dy**2 + dx**2)
+        phi = np.arctan2(dy, dx)
+
+        inner_radius = radius_range[0]
+        outer_radius = radius_range[1]
+        radial_mask = (r >= inner_radius) & (r <= outer_radius)
+
+        angle_start, angle_end = angle_range
+        angle_start = (angle_start + np.pi) % (2 * np.pi) - np.pi
+        angle_end = (angle_end + np.pi) % (2 * np.pi) - np.pi
+        if angle_end >= angle_start:
+            angular_mask = (phi >= angle_start) & (phi <= angle_end)
+        else:
+            angular_mask = (phi >= angle_start) | (phi <= angle_end)
+
+        mask = (radial_mask & angular_mask).astype(float)
+        if sigma is not None and sigma != 0:
+            mask = gaussian_filter(mask, sigma)
+        return mask
+
+def create_arc_supportmask(shape,support_coordinates):
+    """
+    Create cdi support mask from a combination of multiple arc apertures
+
+    Parameter
+    =========
+    shape : int tuple
+        shape/dimension of output array
+    support_coordinates: nested list
+        Contains parameters of arc_hole of each aperture
+        [[center_1,radius_range_1,angular_range_1],[center_2,radius_range_2,angular_range_2],...]
+
+
+    Output
+    ======
+    supportmask: array
+        composed binary mask where arc apertures are "1"
+    ======
+    author: ck 2023
+
+    """
+
+    # Create support mask
+    supportmask = np.zeros(shape)
+    for i in range(len(support_coordinates)):
+        supportmask += arc_mask(
+            supportmask.shape,
+            *support_coordinates[i],
+        )
+
+    return supportmask

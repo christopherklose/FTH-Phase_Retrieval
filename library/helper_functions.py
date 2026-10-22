@@ -6,7 +6,10 @@ Python library for some general functions for paths, data processing, ...
 """
 
 import sys, os
+import glob
 import fnmatch
+import importlib.util
+from tqdm.auto import tqdm
 
 import numpy as np
 
@@ -37,6 +40,29 @@ def list_files(directory):
     '''
     return sorted(os.listdir(directory))
 
+def list_files_pattern(directory: str, pattern: str = "*") -> list:
+    """
+    List all files in the given directory matching the specified pattern.
+
+    :param directory: The directory to search in.
+    :param pattern: The pattern to match files against (e.g., '*.txt' for text files).
+    :return: A list of matching file paths.
+    """
+    if not os.path.exists(directory):
+        print(f"Error: Directory '{directory}' does not exist.")
+        return []
+
+    if not os.path.isdir(directory):
+        print(f"Error: '{directory}' is not a valid directory.")
+        return []
+
+    search_pattern = os.path.join(directory, pattern)
+    files = glob.glob(search_pattern)
+
+    if not files:
+        print(f"No files found in '{directory}' matching pattern '{pattern}'")
+
+    return files
 
 def list_files_excluding_pattern(directory, pattern):
     '''
@@ -52,6 +78,46 @@ def list_files_excluding_pattern(directory, pattern):
     return sorted(excluded_files)
 
 #======================
+#Modules
+#======================
+def import_cpu_only(module_name="CCI_core"):
+    '''
+    Loads a separate copy of a module with FTH_CDI_FORCE_CPU=1, i.e., a copy
+    that uses the CPU even if a GPU is available. The already imported
+    (GPU) version of the module is not affected.
+
+    Parameter
+    =========
+    module_name : str
+        name of the module, e.g., "CCI_core"
+
+    Output
+    ======
+    module : module
+        independent CPU-only copy of the module
+    ======
+    author: ck 2026
+    '''
+
+    spec = importlib.util.find_spec(module_name)
+    if spec is None:
+        raise ImportError(f"Module '{module_name}' not found")
+
+    old_value = os.environ.get("FTH_CDI_FORCE_CPU")
+    os.environ["FTH_CDI_FORCE_CPU"] = "1"
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        # Restore the previous setting
+        if old_value is None:
+            del os.environ["FTH_CDI_FORCE_CPU"]
+        else:
+            os.environ["FTH_CDI_FORCE_CPU"] = old_value
+
+    return module
+
+#======================
 #Physics
 #======================
 #photon energy - wavelength converter
@@ -63,13 +129,13 @@ def photon_energy_wavelength(value, input_unit = 'eV'):
     =========
     value : scalar
         input value either in eV or nm
-    unit : string
+    input_unit : string
         Select input unit. Currently either nm or eV is supported
-        
+
     Output
     ======
     lambda_Xray or energy_Xray: scalar
-        Converted unit  
+        wavelength in m (input in eV) or photon energy in eV (input in nm)
     ======
     author: ck 2023
     '''    
@@ -82,6 +148,43 @@ def photon_energy_wavelength(value, input_unit = 'eV'):
         return energy_Xray
 
 
+def detector_pixel_to_q(pixel, wavelength, detector_distance, pixelsize, center = 0):
+    '''
+    Converts detector pixel indices to reciprocal-space
+    
+    Parameter
+    =========
+    pixel : array
+        array of pixel coordinates 
+    wavelength : scalar
+        photon wavelength in m
+    detector_distance : scalar
+        distance between sample and detector
+    pixelsize : scalar
+        size of detector pixel in m
+    center : scalar
+        origin of pixel array
+        
+    Output
+    ======
+    q : array
+        pixels converted to reciprocal space units
+    ======
+    author: ck 2025
+    '''
+
+    # Centering
+    pixel = pixel - center
+
+    # Multiply with pixelsize to get real space coordinate
+    x = pixel*pixelsize
+
+    # Convert to reciprocal space
+    q = 4*np.pi/wavelength * np.sin(0.5*np.arctan(x/detector_distance))
+    
+    return q
+
+    
 #=========================
 #Image processing
 #=========================
@@ -141,16 +244,16 @@ def fill_infs_nans(array,fill_value = 0):
     Parameter
     =========
     array : numpy array
-        array with non square shape in last two dimensions
+        array that may contain infs and nans (modified in place)
     fill_value : scalar
         fill infs and nans with this value
-        
+
     Output
     ======
     array : numpy array
-        array with filled entries 
+        array with filled entries
     nans_array : numpy array
-        all of these elements
+        bool mask of the replaced inf and nan elements
     ======
     author: ck 2023
     '''
@@ -208,9 +311,9 @@ def binning(array, binning_factor):
 
 def make_square_shape(images):
     """Crops last two dimenions of n-d images to square shape"""
-    crop = np.min(np.array([images.shape[-2], images.shape[-1]]))
-    images = images[..., :crop, :crop]
-
+    if images.shape[-2] != images.shape[-1]:
+        crop = np.min(np.array([images.shape[-2], images.shape[-1]]))
+        images = images[..., :crop, :crop]
     return images
 
 def drop_inhomogenous_part(image_list):
@@ -225,22 +328,11 @@ def drop_inhomogenous_part(image_list):
     # Check if array is inhomogenous
     if np.all(length == max_stack_size) == False:
         print("Dropping inhomogenous part of array")
-        for i in range(len(image_list)):
-            image_list[i] = image_list[i][:max_stack_size]
+        for i in tqdm(range(len(image_list)),desc="Stack"):
+            if length[i] > max_stack_size:
+                image_list[i] = image_list[i][:max_stack_size]
 
     return image_list
-
-def pad_to_dense(M):
-    """Appends the minimal required amount of zeroes at the end of each
-    array in the jagged array `M`, such that `M` looses its jagedness."""
-
-    maxlen = max((r.shape[0]) for r in M)
-    arr_shape = (M[0].shape[-1], M[0].shape[-2])
-
-    Z = np.zeros((len(M), maxlen, arr_shape[0], arr_shape[1]))
-    for enu, row in enumerate(M):
-        Z[enu, : len(row)] += row
-    return Z
 
 
 def reshape_arrays(arrays, dimensions):
@@ -297,7 +389,7 @@ def create_gif(image_filenames, output_gif,fps = 1,loop = 0):
                 for filename in sorted(os.listdir(path)):
                     if filename.endswith(".png") or filename.endswith(".jpg"):
                         filepath = os.path.join(path, filename)
-                        with Image(filename=path) as frame:
+                        with Image(filename=filepath) as frame:
                             img.sequence.append(frame)
             else:
                 print(f"{path} does not exist or is neither a file nor a directory.")
@@ -350,8 +442,8 @@ def quick_plot(data,**kwargs):
 
 def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
     """
-    Expects an array of shape (X, 3), each row being HLS colours.
-    Returns an array of same size, each row being RGB colours.
+    Expects an array of shape (Y, X, 3), the last axis being HLS colours.
+    Returns an array of same size, the last axis being RGB colours.
     Like `colorsys` python module, all values are between 0 and 1.
 
     NOTE: like `colorsys`, this uses HLS rather than the more usual HSL
@@ -396,6 +488,22 @@ def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
 
 
 def complex_to_color(array, abs_range=[0, 100]):
+    """
+    Converts a complex 2d array into an rgb image: the phase is encoded as
+    hue (color), the amplitude as lightness.
+
+    Parameter
+    =========
+    array : 2d complex array
+        input array
+    abs_range : list of two scalars
+        percentiles of the amplitude mapped to lightness 0 and 1
+
+    Output
+    ======
+    rgb : array (Y, X, 3)
+        rgb image with values between 0 and 1
+    """
     # In HLS color system: hue (color), lightness, saturation
     # Angle should represent color
     hue = (np.angle(array) + np.pi) / (2 * np.pi)
@@ -412,3 +520,14 @@ def complex_to_color(array, abs_range=[0, 100]):
     saturation = 1 * np.ones(array.shape)
 
     return hls_to_rgb(np.stack((hue, lightness, saturation), axis=2))
+
+
+def log_clip(image):
+    """
+    Logarithmic scaling for plotting, log10(image - min(image) + 1).
+    The minimum is shifted to 0, so the result is >= 0 (NaN-safe).
+    """
+
+    image = np.log10(image-np.nanmin(image)+1)
+
+    return image

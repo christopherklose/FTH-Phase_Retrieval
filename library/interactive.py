@@ -1,10 +1,24 @@
+"""
+Library with matplotlib widget for gui functions
+
+@authors:   CK: Christopher Klose (christopher.klose@mbi-berlin.de)
+            MS: Michael Schneider (michaelschneider@mbi-berlin.de)
+            RB: Riccardo Battistelli (riccardo.battistelli@helmholtz-berlin.de)
+            KG: Kathinka Gerlinger (kathinka.gerlinger@mbi-berlin.de)
+2022-2026
+"""
+
+import os
+
 import numpy as np
 import h5py
 
-import scipy as sp
+import scipy as scp
 from scipy.ndimage import gaussian_filter, fourier_shift, rotate
+from scipy.ndimage import shift as scipy_shift
 from ipywidgets import FloatRangeSlider, FloatSlider, Button, interact, IntSlider
 from scipy.constants import c, h, e
+import scipy.constants as cst
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import PolygonSelector
@@ -13,19 +27,117 @@ from matplotlib.patches import Ellipse
 import ipywidgets
 import ipywidgets as widgets
 
-import pyFAI
-from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+from pyFAI.integrator.azimuthal import AzimuthalIntegrator
 from pyFAI.detectors import Detector
 
 import skimage.morphology
 from dipy.segment.mask import median_otsu
 
-# Self-written libraries
-from fth import reconstruct, shift_image, propagate, shift_phase
-import mask_lib
+from mask_lib import create_arc_supportmask, arc_mask
 
 
-def shift_image(image,shift):
+#########################################
+# Helper functions
+#########################################
+
+#----------- Reconstructions -------------
+
+def reconstruct(image):
+    '''
+    Reconstruct the image by inverse fft
+    -------
+    author: CK 2022
+    '''
+    return scp.fft.ifftshift(scp.fft.ifft2(scp.fft.fftshift(image),workers=os.cpu_count()))
+
+
+def FFT(image):
+    '''
+    Fourier transform
+    -------
+    author: CK 2022
+    '''
+    return scp.fft.fftshift(scp.fft.fft2(scp.fft.ifftshift(image),workers=os.cpu_count()))
+
+
+def propagate(holo, prop_l, experimental_setup, integer_wl_multiple=True):
+    '''
+    Propagate the hologram
+    
+    Parameters
+    ----------
+    holo : array
+        input hologram
+    prop_l: scalar
+        distance of propagation in metre
+    experimental_setup: dict
+        experimental setup parameters in the following form: {'ccd_dist': [in metre], 'energy': [in eV], 'px_size': [in metre]}
+    integer_wl_multiple: bool, optional
+        Use a propagation, that is an integer multiple of the x-ray wave length, default is True.
+    
+    Returns
+    -------
+    prop_holo: array
+        propagated hologram
+    -------
+    author: MS 2016
+    '''
+    wl = cst.h * cst.c / (experimental_setup['energy'] * cst.e)
+    if integer_wl_multiple:
+        prop_l = np.round(prop_l / wl) * wl
+
+    l1, l2 = holo.shape
+    q0, p0 = [s / 2 for s in holo.shape] # centre of the hologram
+    q, p = np.mgrid[0:l1, 0:l2]  #grid over CCD pixel coordinates   
+    pq_grid = (q - q0) ** 2 + (p - p0) ** 2 #grid over CCD pixel coordinates, (0,0) is the centre position
+    dist_wl = 2 * prop_l * np.pi / wl
+    phase = (dist_wl * np.sqrt(1 - (experimental_setup['px_size']/ experimental_setup['ccd_dist']) ** 2 * pq_grid))
+    return np.exp(1j * phase) * holo
+
+
+#----------- Masking ----------------
+def circle_mask(shape,center,radius,sigma=None):
+
+    '''
+    Draws circle mask with option to apply gaussian filter for smoothing
+    
+    Parameter
+    =========
+    shape : int tuple
+        shape/dimension of output array
+    center : int tuple
+        center coordinates (ycenter,xcenter)
+    radius : scalar
+        radius of mask in px. Care: diameter is always (2*radius+1) px
+    sigma : scalar
+        std of gaussian filter
+        
+    Output
+    ======
+    mask: array
+        binary mask, or smoothed binary mask        
+    ======
+    author: ck 2022
+    '''
+    
+    #setup array
+    x = np.linspace(0,shape[1]-1,shape[1])
+    y = np.linspace(0,shape[0]-1,shape[0])
+    X,Y = np.meshgrid(x,y)
+
+    # define circle
+    mask = np.sqrt(((X-center[1])**2+(Y-center[0])**2)) <= (radius)
+    mask = mask.astype(float)
+
+    # smooth aperture
+    if np.logical_and(sigma != None,sigma != 0):
+        mask = gaussian_filter(mask,sigma)
+           
+    return mask
+
+
+#--------- Other utility -----------------------
+def shift_image(image,shift,interpolation = True,out_dtype = 'numpy'):
     '''
     Shifts image with sub-pixel precission in Fourier space
     
@@ -40,30 +152,44 @@ def shift_image(image,shift):
     
     Returns
     -------
-    image_shifted: array
+    image_shifted: cupy/numpy array
         Shifted image
     -------
-    author: CK 2021
+    author: CK 2023
     '''
     
     #Shift Image
-    shift_image = fourier_shift(sp.fft.fft2(image,workers=-1), shift)
-    shift_image = sp.fft.ifft2(shift_image,workers=-1)
-    shift_image = shift_image.real
+    if interpolation is True:
+        shifted_image = scipy_shift(image,shift,mode = 'reflect')
+    else:
+        shifted_image = fourier_shift(scp.fft.fft2(image), shift)
+        shifted_image = scp.fft.ifft2(shifted_image)
+    
+    return shifted_image
 
-    return shift_image
 
-def cimshow(im, **kwargs):
+
+###########################################
+#             Interactive
+###########################################
+
+
+def cimshow(im, title = None, **kwargs):
     """Simple 2d image plot with adjustable contrast.
     
     Returns matplotlib figure and axis created.
     """
     im = np.array(im).astype("float")
     fig, ax = plt.subplots(figsize=(7,7))
+
+    if title is not None:
+        title0 = title[0] if len(im.shape) == 3 else title
+        ax.set_title(title0)
+    
     im0 = im[0] if len(im.shape) == 3 else im
     mm = ax.imshow(im0, **kwargs)
 
-    cmin, cmax, vmin, vmax = np.nanpercentile(im, [.1, 99.9, .001, 99.999])
+    cmin, cmax, vmin, vmax = np.nanpercentile(im, [.1, 99.9, .0001, 99.9999])
     # vmin, vmax = np.nanmin(im), np.nanmax(im)
     sl_contrast = FloatRangeSlider(
         value=(cmin, cmax), min=vmin, max=vmax, step=(vmax - vmin) / 500,
@@ -79,13 +205,20 @@ def cimshow(im, **kwargs):
         @ipywidgets.interact(nr=w_image)
         def set_image(nr):
             mm.set_data(im[nr])
-    
+
+            if title is not None:
+                ax.set_title(title[nr])
     
     return fig, ax
 
 
+
 class InteractiveCenter:
-    """Plot image with controls for contrast and beamstop alignment tools."""
+    """
+    Plot image with controls for contrast and concentric circles to find the
+    center of the hologram (c0: vertical, c1: horizontal). Right click moves
+    the center to the mouse position; read the result from .c0 and .c1.
+    """
     
     def __init__(self, im, c0=None, c1=None, rBS=15, **kwargs):
         im = np.array(im)
@@ -151,138 +284,12 @@ def axis_to_roi(axis, labels=None):
             labels[1]: slice(int(round(x0)), int(round(x1)))
         }
     return roi
-
-
-
-class InteractiveOptimizer:
-    """
-    Interactively adjust FTH parameters: center, propagation and phase shift.
-    
-    TODO: parameters...
-    """
-    
-    params = {"phase": 0, "center": (0, 0), "propdist": 0, "pixelsize": 13.5e-6,
-              "energy": 779, "detectordist": 0.2}
-    widgets = {}
-    
-    def __init__(self, holo, roi, params={}):
-        self.params.update(params)
-        self.holo = holo  #.astype(np.single)
-        self.holo_centered = holo.copy()
-        self.holo_prop = holo.copy()
-        self.roi = roi
-        
-        self.make_ui()
-    
-    def make_ui(self):
-        self.fig, (self.axr, self.axi) = plt.subplots(
-            ncols=2, figsize=(7, 3.5), sharex=True, sharey=True,
-            constrained_layout=True,
-        )
-        
-        self.reco = reconstruct(self.holo)[self.roi]
-        vmin, vmax = np.percentile(self.reco.real, [.01, 99.9])
-        vlim = 2 * np.abs(self.reco.real).max()
-
-        opt = dict(vmin=vmin, vmax=vmax, cmap="gray_r")
-        self.mm_real = self.axr.imshow(self.reco.real, **opt)
-        self.mm_imag = self.axi.imshow(self.reco.imag, **opt)
-    
-        self.widgets["clim"] = FloatRangeSlider(
-            value=(vmin, vmax), min=-vlim, max=vlim,
-        )
-        self.widgets["phase"] = FloatSlider(
-            value=self.params["phase"], min=-np.pi, max=np.pi,
-        )
-        self.widgets["c0"] = FloatSlider(
-            value=self.params["center"][0], min=-5, max=5, step=.01
-        )
-        self.widgets["c1"] = FloatSlider(
-            value=self.params["center"][1], min=-5, max=5, step=.01
-        )
-        self.widgets["propdist"] = FloatSlider(
-            value=self.params["propdist"], min=-10, max=10, step=.1
-        )
-        self.widgets["energy"] = ipywidgets.BoundedFloatText(
-            value=self.params["energy"], min=1, max=10000,
-        )
-        self.widgets["detectordist"] = ipywidgets.BoundedFloatText(
-            value=self.params["detectordist"], min=.01
-        )
-        self.widgets["pixelsize"] = ipywidgets.BoundedFloatText(
-            value=self.params["pixelsize"], min=1e-7,
-        )
-        
-        interact(self.update_clim, clim=self.widgets["clim"])
-        interact(self.update_phase, phase=self.widgets["phase"])
-        interact(
-            self.update_center,
-            c0=self.widgets["c0"],
-            c1=self.widgets["c1"]
-        )
-        interact(
-            self.update_propagation,
-            dist=self.widgets["propdist"],
-            det=self.widgets["detectordist"],
-            pxs=self.widgets["pixelsize"],
-            energy=self.widgets["energy"],
-        )
-    
-    def update_clim(self, clim):
-        self.mm_real.set_clim(clim)
-        self.mm_imag.set_clim(clim)
-    
-    def update_phase(self, phase):
-        self.params["phase"] = phase
-        reco_shifted = shift_phase(self.reco, phase)
-        self.mm_real.set_data(reco_shifted.real)
-        self.mm_imag.set_data(reco_shifted.imag)
-    
-    def update_center(self, c0, c1):
-        self.params["center"] = (c0, c1)
-        self.holo_centered = shift_image(self.holo, [c0, c1])
-        self.reco = reconstruct(self.holo_centered)[self.roi]
-        self.update_phase(self.params["phase"])
-    
-    def update_propagation(self, dist, det, pxs, energy):
-        dist *= 1e-6
-        self.params.update({
-            "propdist": dist,
-            "detectordist": det,
-            "pixelsize": pxs,
-            "energy": energy
-        })
-        self.holo_prop = propagate(self.holo_centered, dist, det, pxs, energy)
-        self.reco = reconstruct(self.holo_prop)[self.roi]
-        self.update_phase(self.params["phase"])
-    
-    def get_full_reco(self):
-        return shift_phase(reconstruct(self.holo_prop), self.params["phase"])
-
-
-def intensity_scale(im1, im2, mask=None):
-    mask = mask if mask is not None else 1
-    diff = (im1 - im2) * mask
-    fig, ax = plt.subplots()
-    hist, bins, patches = ax.hist(mask.flatten(), np.linspace(-100, 100, 201))
-    ax.set_yscale("log")
-    ax.axvline(0, c='r', lw=.5)
-    ax.grid(True)
-
-    @ipywidgets.interact(f=(.2, 2.0, .001))
-    def update(f):
-        diff = mask * (im1 - f * im2)
-        hist, _ = np.histogram(diff, bins)
-        for p, v in zip(patches, hist):
-            p.set_height(v)
-    return fig, ax
-
     
 
 class AzimuthalIntegrationCenter:
     """Plot image with controls for contrast and center alignment tools."""
 
-    def __init__(self, im, ai, c0=None, c1=None, mask=None,circle_radius=100,**kwargs):
+    def __init__(self, im, ai, c0=None, c1=None, mask=None,**kwargs):
         # User Feedback/Instructions
         print("Left: 1d azimuthal Integration I(q)")
         print("Right: 2d azimuthal Integration I(q,chi)")
@@ -301,8 +308,8 @@ class AzimuthalIntegrationCenter:
         self.c1 = c1
         self.radial_range = kwargs["radial_range"]
         self.im_data_range = kwargs["im_data_range"]
-        self.pixel_size1 = ai.detector.get_pixel1()
-        self.pixel_size2 = ai.detector.get_pixel2()
+        self.pixel_size1 = ai.detector.pixel1
+        self.pixel_size2 = ai.detector.pixel2
         self.qlines = kwargs["qlines"]
         self.ai = ai
         self.mask = mask
@@ -321,37 +328,28 @@ class AzimuthalIntegrationCenter:
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
-        self.fig, self.ax = plt.subplots(1, 3, figsize=(12, 4))    
-        # center widget
-        mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
-        self.ax[0].imshow(im, vmin=mi, vmax=ma)
-        self.circles = []        
-        
-        for i in range((im.shape[0]//2//circle_radius)):
-            color = 'g' if i == 1 else 'r'
-            circle = plt.Circle([c0, c1], circle_radius * (i + 1), ec=color, fill=False, alpha=0.5)
-            self.circles.append(circle)
-            self.ax[0].add_artist(circle)
-            
+        self.fig, self.ax = plt.subplots(1, 2, figsize=(8, 4))    
+
         # 1d Ai
-        self.ax[1].plot(self.q_t, self.mI_t)
-        self.ax[1].set_xlim(self.radial_range)
-        self.ax[1].set_xlabel("q in 1/nm")
-        self.ax[1].set_ylabel("Mean Integrated Intensity")
-        self.ax[1].grid()
+        self.ax[0].plot(self.q_t, self.mI_t)
+        self.ax[0].set_xlim(self.radial_range)
+        self.ax[0].set_xlabel("q in 1/nm")
+        self.ax[0].set_ylabel("Mean Integrated Intensity")
+        self.ax[0].grid()
         
         # 2d Ai
-        self.timshow = self.ax[2].imshow(self.I_t, vmin=mi, vmax=ma)
-        self.ax[2].set_ylabel("Angle")
-        self.ax[2].set_xlabel("q in px")
-        self.ax[2].grid()
+        mi, ma = np.percentile(self.im,[1,99])
+        self.timshow = self.ax[1].imshow(self.I_t, vmin=mi, vmax=ma)
+        self.ax[1].set_ylabel("Angle")
+        self.ax[1].set_xlabel("q in px")
+        self.ax[1].grid()
 
         # qlines
         for qt in self.qlines:
-            self.ax[2].axvline(qt, ymin=0, ymax=360, c="red")
+            self.ax[1].axvline(qt, ymin=0, ymax=360, c="red")
 
-        w_c0 = ipywidgets.FloatSlider(value=c0,min=im.shape[-2]/2-np.round(im.shape[-2]/6),max=im.shape[-2]/2+np.round(im.shape[-2]/6),step=.5, description="y-center",layout=ipywidgets.Layout(width="500px"))
-        w_c1 = ipywidgets.FloatSlider(value=c1,min=im.shape[-1]/2-np.round(im.shape[-1]/6),max=im.shape[-1]/2+np.round(im.shape[-1]/6),step=.5, description="x-center",layout=ipywidgets.Layout(width="500px"))
+        w_c0 = ipywidgets.FloatSlider(value=c0,min=im.shape[-2]/2-np.round(im.shape[-2]/6),max=im.shape[-2]/2+np.round(im.shape[-2]/6),step=.25, description="y-center",layout=ipywidgets.Layout(width="500px"))
+        w_c1 = ipywidgets.FloatSlider(value=c1,min=im.shape[-1]/2-np.round(im.shape[-1]/6),max=im.shape[-1]/2+np.round(im.shape[-1]/6),step=.25, description="x-center",layout=ipywidgets.Layout(width="500px"))
 
         ipywidgets.interact(self.update, c0=w_c0, c1=w_c1)
 
@@ -377,17 +375,12 @@ class AzimuthalIntegrationCenter:
         self.mI_t = np.nanmean(self.I_t, axis=0)
 
         # Plot
-        #plot center
-        for i, c in enumerate(self.circles):
-            c.set_center([c1, c0])
- 
-        
         # 1d Ai
-        self.ax[1].clear()
-        self.ax[1].plot(self.q_t, self.mI_t)
-        self.ax[1].set_xlabel("q in 1/nm")
-        self.ax[1].set_ylabel("Mean Integrated Intensity")
-        self.ax[1].grid()
+        self.ax[0].clear()
+        self.ax[0].plot(self.q_t, self.mI_t)
+        self.ax[0].set_xlabel("q in 1/nm")
+        self.ax[0].set_ylabel("Mean Integrated Intensity")
+        self.ax[0].grid()
 
         # 2d Ai
         mi, ma = np.nanpercentile(self.I_t, self.im_data_range)
@@ -412,7 +405,7 @@ class InteractiveBeamstop:
         # Create beamstop mask
         im = np.array(im)
         self.im = im
-        self.mask_bs = 1 - mask_lib.circle_mask(
+        self.mask_bs = 1 - circle_mask(
             im.shape, self.center, self.rBS, sigma = self.stdBS
         )
         self.image = np.array(im*self.mask_bs)
@@ -443,7 +436,7 @@ class InteractiveBeamstop:
         self.center = [c0,c1]
         self.rBS = r
         self.stdBS = std
-        self.mask_bs = 1 - mask_lib.circle_mask(
+        self.mask_bs = 1 - circle_mask(
             self.mask_bs.shape, self.center, r, sigma = std
         )
         self.image = self.im*self.mask_bs
@@ -578,10 +571,8 @@ class draw_polygon_mask:
     def get_vertice_coordinates(self):
         return self.round_nested_list(self.coordinates,1)
 
-        
-        
 class InteractiveAutoBeamstop:
-    """Plot image with controls for contrast and beamstop alignment tools."""
+    """Plot image with controls for contrast and the automated beamstop mask (threshold, radius, expand)."""
 
     def __init__(self, image, thres, radius, expand, method="intensity", **kwargs):
         self.image = image
@@ -659,7 +650,7 @@ class InteractiveAutoBeamstop:
 
     def mask_postprocessing(self, hologram_mask, radius, expand):
         # Draw beamstop only up to given radius
-        hologram_mask = hologram_mask * mask_lib.circle_mask(
+        hologram_mask = hologram_mask * circle_mask(
             self.image.shape,
             [self.image.shape[0] / 2, self.image.shape[1] / 2 - 3],
             radius,
@@ -685,7 +676,7 @@ class InteractiveAutoBeamstop:
         hologram_mask = skimage.morphology.dilation(hologram_mask, footprint)
 
         # Fill up small holes in the mask
-        hologram_mask = sp.ndimage.binary_fill_holes(
+        hologram_mask = scp.ndimage.binary_fill_holes(
             hologram_mask, structure=np.ones((5, 5))
         )
         return hologram_mask
@@ -711,7 +702,7 @@ class InteractiveAutoBeamstop:
         hologram_mask = skimage.morphology.dilation(hologram_mask, footprint)
 
         # Draw beamstop only up to given radius
-        hologram_mask = hologram_mask * mask_lib.circle_mask(
+        hologram_mask = hologram_mask * circle_mask(
             hologram_mask.shape,
             np.array(hologram_mask.shape)/2,
             radius,
@@ -869,20 +860,21 @@ class InteractiveCircleCoordinates:
             self.widgets["c1"].value = c1
 
     def get_params(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return list of tuples with mask parameters (ycenter, xcenter, radius)"""
         return [(np.round(c.center[1],1),np.round(c.center[0],1), np.round(c.radius,1)) for c in self.masks]
 
 
 class InteractiveEllipseCoordinates:
-    def __init__(self, image, num_masks,coordinates=None):
-        """
-        Creates overlay with ellipses on an image. Sliders allow changing
-        between ellipses, adjust ellipse positions, ellipse sizes and rotation angle. Usefull for
-        creating support mask for holographically aided phase retrieval
-    
-        Return list of tuples with mask parameters (center, height, width, angle)
-        """
+    """
+    Creates overlay with ellipses on an image. Sliders allow changing
+    between ellipses, adjust ellipse positions, ellipse sizes and rotation angle. Usefull for
+    creating support mask for holographically aided phase retrieval
 
+    get_params() returns list of tuples ((xcenter, ycenter), height, width, angle in degrees)
+    (input for mask_lib.create_ellipse_supportmask)
+    """
+
+    def __init__(self, image, num_masks,coordinates=None):
         print("Use circle index slider to change between circles. The active circle is highlighted in red."
         )
         print("Right click to move circle to mouse position!")
@@ -1001,13 +993,179 @@ class InteractiveEllipseCoordinates:
             self.widgets["c1"].value = c1
 
     def get_params(self):
-        """Return list of tuples with mask parameters (center, height, width, angle)"""
+        """Return list of tuples with mask parameters ((xcenter, ycenter), height, width, angle in degrees)"""
         return [((np.round(c.center[0],1),np.round(c.center[1],1)), c.height, c.width, np.round(c.angle,1)) for c in self.masks]
-    
 
+
+class InteractiveArcCoordinates:
+    """
+    Creates overlay with arc (annular-sector) masks on an image. Sliders allow
+    changing between arcs, adjust center, inner/outer radius and angular range
+    (radians). The active arc is shown in red, all others in blue. Usefull for
+    creating support mask for holographically aided phase retrieval
+
+    get_params() returns [[ycenter, xcenter], [r0, r1], [phi0, phi1]] per arc
+    (input for mask_lib.create_arc_supportmask), return_mask() the combined mask.
+    """
+
+    def __init__(self, image, num_masks, coordinates=None):
+        self.image = image
+        self.num_masks = num_masks
+        self._updating = False
+        self.init_masks(coordinates)
+        self.draw_gui()
+
+    def coordinates_to_dict(self, coordinate):
+        return {
+            "centery": coordinate[0][0],
+            "centerx": coordinate[0][1],
+            "r0": coordinate[1][0],
+            "r1": coordinate[1][1],
+            "phi0": coordinate[2][0],
+            "phi1": coordinate[2][1],
+        }
+
+    def init_masks(self, coordinates):
+        if coordinates is None:
+            coordinates = []
+            for n in range(self.num_masks):
+                coordinates.append([
+                    (self.image.shape[0] / 2, self.image.shape[1] / 2),
+                    [50, 100],
+                    [0, np.pi]
+                ])
+
+        self.mask_objects = [self.coordinates_to_dict(coordinate) for coordinate in coordinates]
+        self.masks = [arc_mask(self.image.shape, *coordinates[n]) for n in range(self.num_masks)]
+        self.project_masks()
+
+    def project_masks(self):
+        active_index = self.widgets["mask_index"].value if hasattr(self, "widgets") else 0
+        h, w = self.image.shape[:2]
+        overlay = np.zeros((h, w, 4), dtype=float)
+
+        for i, mask in enumerate(self.masks):
+            m = mask.astype(float)
+            if i == active_index:
+                overlay[..., 0] = np.maximum(overlay[..., 0], m)
+                overlay[..., 3] = np.maximum(overlay[..., 3], m * 0.5)
+            else:
+                overlay[..., 2] = np.maximum(overlay[..., 2], m)
+                overlay[..., 3] = np.maximum(overlay[..., 3], m * 0.3)
+
+        self.mask = overlay
+
+    def draw_gui(self):
+        """Create plot and control widgets."""
+
+        self.fig, self.ax = plt.subplots(figsize=(6, 6))
+        cmin, cmax, vmin, vmax = np.nanpercentile(self.image, [0.01, 99.99, 0.1, 99.9])
+        self.mm = self.ax.imshow(self.image, vmin=vmin, vmax=vmax, cmap='gray')
+        self.m2 = self.ax.imshow(self.mask)
+
+        self.widgets = {
+            "contrast": widgets.FloatRangeSlider(
+                value=(vmin, vmax),
+                min=cmin,
+                max=cmax,
+                step=(vmax - vmin) / 500,
+                layout=ipywidgets.Layout(width="500px"),
+            ),
+            "mask_index": widgets.IntSlider(min=0, max=self.num_masks - 1, value=0),
+            "centery": widgets.FloatSlider(
+                min=0, max=self.image.shape[0], value=self.image.shape[0] / 2,
+                step=0.5, description="centery", layout=ipywidgets.Layout(width="350px"),
+            ),
+            "centerx": widgets.FloatSlider(
+                min=0, max=self.image.shape[1], value=self.image.shape[1] / 2,
+                step=0.5, description="centerx", layout=ipywidgets.Layout(width="350px"),
+            ),
+            "inner_radius": widgets.FloatSlider(
+                min=0, max=np.array(self.image.shape).max() / 2, value=50,
+                step=0.5, description="inner_radius", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "outer_radius": widgets.FloatSlider(
+                min=0, max=np.array(self.image.shape).max() / 2, value=100,
+                step=0.5, description="outer_radius", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "start_angle": widgets.FloatSlider(
+                min=0, max=2 * np.pi, value=0,
+                step=0.0125, description="start_angle",readout_format=".4f", layout=ipywidgets.Layout(width="450px"),
+            ),
+            "end_angle": widgets.FloatSlider(
+                min=0, max=2 * np.pi, value=np.pi,
+                step=0.0125, description="end_angle", readout_format=".4f",layout=ipywidgets.Layout(width="450px"),
+            ),
+        }
+
+        ipywidgets.interact(self.update_clim, contrast=self.widgets["contrast"])
+        widgets.interact(self.update_controls, index=self.widgets["mask_index"])
+        widgets.interact(
+            self.update_arc,
+            centery=self.widgets["centery"],
+            centerx=self.widgets["centerx"],
+            inner_radius=self.widgets["inner_radius"],
+            outer_radius=self.widgets["outer_radius"],
+            start_angle=self.widgets["start_angle"],
+            end_angle=self.widgets["end_angle"],
+        )
+
+    def update_clim(self, contrast):
+        self.mm.set_clim(contrast)
+
+    def update_controls(self, index):
+        """Update control widget values with selected circle parameters."""
+        self._updating = True
+        arc = self.mask_objects[index]
+        self.widgets["centery"].value = arc["centery"]
+        self.widgets["centerx"].value = arc["centerx"]
+        self.widgets["inner_radius"].value = arc["r0"]
+        self.widgets["outer_radius"].value = arc["r1"]
+        self.widgets["start_angle"].value = arc["phi0"]
+        self.widgets["end_angle"].value = arc["phi1"]
+        self._updating = False
+        self.project_masks()
+        self.update_image()
+
+    def update_arc(self, centery, centerx, inner_radius, outer_radius, start_angle, end_angle):
+        if self._updating:
+            return
+        index = self.widgets["mask_index"].value
+        arc_dict = {
+            "centery": centery,
+            "centerx": centerx,
+            "r0": inner_radius,
+            "r1": outer_radius,
+            "phi0": start_angle,
+            "phi1": end_angle,
+        }
+        self.mask_objects[index].update(arc_dict)
+        self.masks[index] = arc_mask(self.image.shape, *self.dict_to_params(arc_dict))
+        self.project_masks()
+        self.update_image()
+
+        print("Aperture Coordinates:")
+        print(self.get_params())
+
+    def update_image(self):
+        self.m2.set_data(self.mask)
+
+    def dict_to_params(self, arc_dict):
+        return [
+            [arc_dict["centery"], arc_dict["centerx"]],
+            [arc_dict["r0"], arc_dict["r1"]],
+            [np.round(arc_dict["phi0"],3), np.round(arc_dict["phi1"],3)],
+        ]
+
+    def get_params(self):
+        """Return list of mask parameters [[ycenter, xcenter], [r0, r1], [phi0, phi1]] (input for mask_lib.create_arc_supportmask)"""
+        return [self.dict_to_params(arc_dict) for arc_dict in self.mask_objects]
+
+    def return_mask(self):
+        return np.clip(np.sum(self.masks,axis=0),0,1)
 
 class Shift_Scale_Mask:
-    """Plot image and mask with controls for contrast, x/y shift and scaling."""
+    """Plot image with controls for contrast, x/y shift and scaling."""
     
     def __init__(self, image, mask, shift = [0,0], scale = 0, **kwargs):
         self.image = image
@@ -1040,9 +1198,9 @@ class Shift_Scale_Mask:
             layout=ipywidgets.Layout(width="500px"),
             ),
             "shift_ver": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[0], step=0.5, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[0], step=1, description="shift_ver",layout=ipywidgets.Layout(width="350px")),
             "shift_hor": widgets.FloatSlider(
-                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[1], step=0.5, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
+                min=-self.shape[1]/4, max=self.shape[1]/4, value=self.shift[1], step=1, description="shift_hor",layout=ipywidgets.Layout(width="350px")),
             "scale": widgets.IntSlider(min=-20, max=20, value=self.scale,description="scale"),
                     }
 
@@ -1092,7 +1250,7 @@ class Shift_Scale_Mask:
             self.update_mask(shift[0],shift[1],self.scale)
         
     def get_mask(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return shifted and scaled mask, shift [vertical, horizontal] and scale"""
         return self.mask, self.shift, self.scale
 
 
@@ -1187,5 +1345,127 @@ class Shift_Rotate:
             self.update_image(shift[0],shift[1],self.angle)
         
     def get_parameter(self):
-        """Return list of tuples with mask parameters (center, radius)"""
+        """Return shifted and rotated image, shift [vertical, horizontal] and rotation angle"""
         return self.image, self.shift, self.angle
+
+
+def focusCDI(pos,neg, roi, mask=1,phase=0, prop_dist=0,dx=0, dy=0, scale=(0,100), experimental_setup={'ccd_dist':18e-2, 'energy':779.5, 'px_size':20e-6}, operation="-", max_prop_dist=10):
+    '''
+    Applies a sub-pixel centering, propagation distance and global phase shift.
+    Also plots real,image,abs,angle images while you do it
+    INPUT:  pos,neg: array, the shifted and masked holograms
+            mask: optional array, =1 in the region you want to consider, =0 elsewhere. Limits of the colormaps are going to be chosen in this region (default: whole image)
+            roi: slice, region of interest as np.s_[ystart:ystop, xstart:xstop]
+            phase: optional, float, starting value for the phase slider (default is 0)
+            prop_dist: optional, float, starting value for the propagation slider in um (default is 0)
+            dx, dy: optional, float, starting values for the sub-pixel shift of neg (default is 0)
+            scale: optional, tuple of floats, values for the scaling using percentiles (default is (0, 100))
+            experimental_setup: dictionary containing:
+             - ccd_dist: optional, float, distance between CCD and sample in meter (default is 18e-2 (m))
+             - energy: optional, float, energy of the x-rays in eV (default is 779.5 (eV))
+             - px_size: optional, float, physical size of the CCD pixel in m (default is 20e-6 (m))
+            operation: the operation you'll do on those holograms ("-", "+", "/", "log", "-/+")
+            max_prop_dist: maximum value for propagated distances
+    OUPUT:  sliders for the propagation, phase, subpixel shift distances in x and y
+            When you are finished, you can save the positions of the sliders.
+    -------
+    author: RB 2020
+    '''
+    # Scalar mask (default) means: use the whole image
+    if np.isscalar(mask):
+        mask = np.ones(np.shape(pos))
+
+    style = {'description_width': 'initial'}
+    fig, axs = plt.subplots(2,2, figsize=(6,6))
+    def p(x, y, fx, fy):
+        image_p = FFT(propagate(pos, x*1e-6, experimental_setup)* np.exp(1j*y))
+        image_n = FFT(propagate(neg, x*1e-6, experimental_setup)* np.exp(1j*y))
+        
+        image_n = shift_image(image_n, [fx, fy])
+        maskroi=(mask)[roi]
+        
+        if operation== "-":
+            image= (image_p-image_n)
+        elif operation== "+":
+            image= (image_p+image_n)
+        elif operation=="/":
+            image= (image_p/image_n)* np.exp(1j*y)
+        elif operation=="log":
+            image= np.log(np.abs(image_p/image_n))* np.exp(1j*np.angle(image_p/image_n))
+        elif operation=="-/+":
+            image= (image_p-image_n)/(image_p+image_n) * np.exp(1j*y)
+
+        image=np.nan_to_num(image, nan=0, posinf=0, neginf=0)[roi]
+        simage_mask=image[maskroi==1]
+    
+        mi,ma=np.percentile(np.abs(simage_mask), scale)
+        ax1 = axs[0,0].imshow(np.abs(image),cmap = 'gray', vmin=mi, vmax=ma)
+        axs[0,0].set_title("Abs")
+        
+        mi,ma=np.percentile(np.angle(simage_mask), scale)
+        ax2 = axs[0,1].imshow(np.angle(image), cmap='gray', vmin=mi, vmax=ma)
+        axs[0,1].set_title("Phase")
+        
+        mi,ma=np.percentile(np.real(simage_mask), scale)
+        ax3 = axs[1,0].imshow(np.real(image), cmap='gray', vmin=mi, vmax=ma)
+        axs[1,0].set_title("Real Part")
+        
+        mi,ma=np.percentile(np.imag(simage_mask), scale)
+        ax4 = axs[1,1].imshow(np.imag(image), cmap='gray', vmin=mi, vmax=ma)
+        axs[1,1].set_title("Imaginary Part")
+        #fig.tight_layout()
+        return
+    
+    layout = widgets.Layout(width='75%')
+    style = {'description_width': 'initial'}
+    slider_prop = widgets.FloatSlider(min=-max_prop_dist, max=max_prop_dist, step=0.01, value=prop_dist, layout=layout,
+                                      description='propagation[um]', style=style)
+    slider_phase = widgets.FloatSlider(min=-np.pi, max=np.pi, step=0.001, value=phase, layout=layout,
+                                       description='phase shift', style=style)
+    slider_dx = widgets.FloatSlider(min = -6, max = 6, step = 0.01, value = dx, layout = layout,
+                                       description = 'x shift', style = style)
+    slider_dy = widgets.FloatSlider(min = -6, max = 6, step = 0.01, value = dy, layout = layout,
+                                       description = 'y shift', style = style)
+
+    widgets.interact(p, x=slider_prop, y=slider_phase, fx = slider_dx, fy = slider_dy)
+
+    return (slider_prop, slider_phase, slider_dx, slider_dy)
+
+
+def propagate_phase(holo, ROI, phase=0, prop_dist=0, scale=(0,100), experimental_setup = {'ccd_dist': 18e-2, 'energy': 779.5, 'px_size' : 20e-6}):
+    '''
+    starts the quest for the right propagation distance and global phase shift.
+    Input:  centered and masked hologram (difference, sum, single helicity, ...)
+            coordinates of the ROI in the order np.array([y1, y2, x1, x2]) as np.s_
+    Returns the two slider's position which can be retrieved
+    -------
+    author: CK 2026
+    '''
+    ph_flip = False
+    style = {'description_width': 'initial'}
+    fig, axs = plt.subplots(1,3,figsize=(9,4))
+    def p(x,y):
+        image = reconstruct(propagate(holo, x*1e-6, experimental_setup = experimental_setup)*np.exp(1j*y))
+        mir, mar = np.percentile(np.real(image[ROI]), scale)
+        mii, mai = np.percentile(np.imag(image[ROI]), scale)
+        mia, maa = np.percentile(np.abs(image[ROI]), scale)
+
+        ax1 = axs[0].imshow(np.real(image[ROI]), cmap='gray', vmin = mir, vmax = mar)
+        axs[0].set_title("Real Part")
+        ax2 = axs[1].imshow(np.imag(image[ROI]), cmap='gray', vmin = mii, vmax = mai)
+        axs[1].set_title("Imaginary Part")
+        ax2 = axs[2].imshow(np.abs(image[ROI]), cmap='gray', vmin = mii, vmax = mai)
+        axs[2].set_title("Absolute Value")
+        
+        print('REAL: max=%i, min=%i'%(np.max(np.real(image)), np.min(np.real(image))))
+        print('IMAG: max=%i, min=%i'%(np.max(np.imag(image)), np.min(np.imag(image))))
+        return
+    
+    layout = widgets.Layout(width='750px')
+    style = {'description_width': 'initial'}
+    slider_prop = widgets.FloatSlider(min=-10, max=10, step=0.01, value=prop_dist, layout=layout, description='propagation[um]', style=style)
+    slider_phase = widgets.FloatSlider(min=-np.pi, max=np.pi, step=0.001, value=phase, layout=layout, description='phase shift', style=style)
+    
+    widgets.interact(p, x=slider_prop, y=slider_phase)
+    
+    return (slider_prop, slider_phase)
